@@ -5,7 +5,7 @@ A simple script which can help you read scattered pictures
 ## How to use
 
 ```shell
-python3 Reader.py
+python3 Reader_v2.py
 ```
 
 **'Use dir'**: choose the directory which contains your scattered pictures
