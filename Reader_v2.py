@@ -172,9 +172,10 @@ class Reader:
 		except ValueError:
 			pass
 
-		self.length = len(self.file_list)
 		print('Loading...')
 		self.load_img()
+		print('sorting...')
+		self.sort_img()
 		try:
 			self.show_img()
 		except IndexError:
