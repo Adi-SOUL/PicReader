@@ -72,7 +72,8 @@ class Reader:
 		self.content = ''
 		self.dir_path = ''
 		self.file_list = []
-		self.img_list = []
+		self.key_list = []
+		self.img_dict = {}
 		self.length = 0
 		self.id_ = 0
 
@@ -104,9 +105,10 @@ class Reader:
 		self.win.mainloop()
 
 	def show_img(self):
-		self.img = self.img_list[self.id_][0]
-		w, h = self.img_list[self.id_][1]
-		title_ = '{name}--{i}/{l}'.format(name=self.file_list[self.id_].split('\\')[-2], i=self.id_, l=self.length)
+		img_key = self.key_list[self.id_]
+		self.img = self.img_dict[img_key][0]
+		w, h = self.img_dict[img_key][1]
+		title_ = '{name}--{i}/{l}'.format(name=self.key_list[self.id_].split('\\')[-2], i=self.id_, l=self.length)
 		self.win.title(title_)
 		x = int(self.SW/2 - w/2)
 		y = int(self.SH/2 - h/2)
@@ -121,23 +123,26 @@ class Reader:
 		for thread in threads:
 			thread.join()
 		while not self.q.empty():
-			self.img_list = self.img_list + self.q.get()
-		self.length = len(self.img_list)
+			for item in self.q.get():
+				self.img_dict[item[-1]] = (item[0], item[1])
+		self.length = len(self.img_dict.keys())
 
 	def sort_img(self):
-		for j in tqdm(range(self.length-1)):
-			for i in range(self.length-j-1):
-				_a, _b = self.img_list[i][-1].split('\\')[:-1], self.img_list[i+1][-1].split('\\')[:-1] 
-				a, b = encode(self.img_list[i][-1].split('\\')[-1].split('.')[-2]), encode(self.img_list[i+1][-1].split('\\')[-1].split('.')[-2]) 
-				if _a != _b:
-					continue
-				else:
-					pass
+		search_length = self.length
+		while search_length > 1:
+			sub_list = []
+			__path = self.file_list[0].split('\\')[:-1]
+			for i in range(search_length-1, -1, -1):
+				if self.file_list[i].split('\\')[:-1] == __path:
+					sub_list.append(self.file_list.pop(i))
+			__len = len(sub_list)
+			#sort
+			sub_list.sort(key=lambda x: encode(x.split('\\')[-1]))
 
-				if a > b:
-					temp = self.img_list[i+1]
-					self.img_list[i+1] = self.img_list[i]
-					self.img_list[i] = temp
+			for name in sub_list:
+				self.key_list.append(name)
+
+			search_length = search_length - __len
 
 	def use_file(self):
 		if not self.flag:
@@ -170,8 +175,6 @@ class Reader:
 		self.length = len(self.file_list)
 		print('Loading...')
 		self.load_img()
-		print('Sorting...')
-		self.sort_img()
 		try:
 			self.show_img()
 		except IndexError:
@@ -197,16 +200,16 @@ class Reader:
 
 		self.length = len(self.file_list)
 		self.content = '\\'.join([self.dir_path, 'content.txt'])
-		with open(self.content, 'w', encoding='utf-8') as file:
-			for i in self.file_list:
-				to_file = i + '\n'
-				file.write(to_file)
-			file.write('0\n')
 
 		print('Loading...')
 		self.load_img()
 		print('Sorting...')
 		self.sort_img()
+		with open(self.content, 'w', encoding='utf-8') as file:
+			for i in self.key_list:
+				to_file = i + '\n'
+				file.write(to_file)
+			file.write('0\n')
 		try:
 			self.show_img()
 		except IndexError:
@@ -269,8 +272,8 @@ class Reader:
 	def close_(self):
 		try:
 			with open(self.content, 'w+', encoding='utf-8') as file:
-				self.file_list.append(str(self.id_))
-				for i in self.file_list:
+				self.key_list.append(str(self.id_))
+				for i in self.key_list:
 					to_file = i + '\n'
 					file.write(to_file)
 		except FileNotFoundError:
