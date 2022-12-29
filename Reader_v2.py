@@ -59,15 +59,13 @@ class Reader:
 	def __init__(self):
 		self.thread_num = 4
 		self.q = Queue()
-		# self.MAX_MEM = 10737418240 # 10Gbytes
-		# self.total = 0
+		self.finished = False
+
 		self.win = tkinter.Tk()
 		self.win.title('reADpIc')
-		# self.win.geometry('1280x780+50+80')
 		self.SW, self.SH = self.win.winfo_screenwidth(), self.win.winfo_screenheight()
 		x = self.SW/2 - 1280/2
 		y = self.SH/2 - 900/2
-		# self.sub = tkinter.Toplevel()
 		self.win.geometry('%dx%d+%d+%d' % (1280, 900, x, y))
 
 		self.flag = False
@@ -100,6 +98,7 @@ class Reader:
 		self.win.bind('<Right>', self.show_next_img)
 		self.win.bind('<Down>', self.show_next_img)
 		self.win.bind('<Left>', self.show_last_img)
+		self.win.bind('<MouseWheel>', self.mouse_img)
 		self.win.bind('<Tab>', self.jump)
 		self.win.protocol("WM_DELETE_WINDOW", self.close_)
 		self.win.mainloop()
@@ -178,6 +177,7 @@ class Reader:
 		except IndexError:
 			self.id_ = 0
 			self.show_img()
+		self.finished = True
 
 	def use_dir(self):
 		if not self.flag:
@@ -212,20 +212,35 @@ class Reader:
 		except IndexError:
 			self.id_ = 0
 			self.show_img()
+		self.finished = True
 
 	def show_next_img(self, event):
+		if not self.finished:
+			return 
 		self.id_ += 1
 		if self.id_ > self.length - 1:
 			self.id_ = 0
 		self.show_img()
 
 	def show_last_img(self, event):
+		if not self.finished:
+			return 
 		self.id_ -= 1
 		if self.id_ > self.length - 1:
 			self.id_ = 0
 		self.show_img()
-
+		
+	def mouse_img(self, event):
+		if not self.finished:
+			return
+		if event.delta > 0:
+			self.show_last_img(event)
+		else:
+			self.show_next_img(event)
+			
 	def jump(self, event):
+		if not self.finished:
+			return 
 		go_to = askstring(title='pages', prompt='pages')
 		try:
 			ret = re.match('[+-]*[0-9]{,}', go_to)
