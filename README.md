@@ -7,6 +7,7 @@ A simple script which can help you read scattered pictures
 ```shell
 python3 Reader_v2.py
 ```
+Or you can get releases here: https://github.com/Adi-SOUL/PicReader/releases
 
 **'Use dir'**: choose the directory which contains your scattered pictures
 
