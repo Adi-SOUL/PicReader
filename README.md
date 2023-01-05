@@ -1,6 +1,6 @@
 # PicReader
 
-![readpic](F:\Downloads\PicReader\readpic.png)
+![readpic](PicReader/readpic.png)
 
 A simple script which can help you read scattered pictures
 
