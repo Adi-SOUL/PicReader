@@ -8,10 +8,17 @@ import threading
 from sys import exit
 from queue import Queue
 from _tkinter import TclError
+from tkinter import messagebox
 from PIL import Image, ImageTk
 from tkinter.simpledialog import askstring
 from tkinter.filedialog import askdirectory, askopenfilename
 from tools import flatten, sub_loader, encode, thread_func, get_img, toplevel_with_bar
+
+
+if os.name == 'nt':
+	path_str = '\\'
+else:
+	path_str = '/'
 
 
 class Reader:
@@ -34,41 +41,51 @@ class Reader:
 		self.img_1 = None
 		self.img_2 = None
 		self.img_3 = None
+		self.ex_h = (1440, 480)
+		self.ex_w = (1900, 400)
+		self.old_style = False
 
 		self.win = tkinter.Tk()
 		self.win.title('reADpIc')
+		self.scaling_ratio = 1.
 		self.pixelVirtual = tkinter.PhotoImage(width=1, height=1)
 		self.SW, self.SH = self.win.winfo_screenwidth(), self.win.winfo_screenheight()
-		x = self.SW / 2 - 1280 / 2
-		y = self.SH / 2 - 900 / 2
-		self.win.geometry('%dx%d+%d+%d' % (1280, 900, x, y))
-
+		self.scaling_ratio = self.SW/3072 if self.SW/3072 < self.SH/1728 else self.SH/1728
+		size = int(20 * self.scaling_ratio) if int(20 * self.scaling_ratio) < 20 else 20
+		if self.scaling_ratio < 0.4:
+			exit()
+		x = self.SW / 2 - 1280*self.scaling_ratio / 2
+		y = self.SH / 2 - 900*self.scaling_ratio / 2
+		self.win.geometry('%dx%d+%d+%d' % (1280*self.scaling_ratio, 900*self.scaling_ratio, x, y))
 		init_img = Image.open(r'readpic.png')
-		self.img = ImageTk.PhotoImage(init_img)
+		if self.scaling_ratio == 1.:
+			self.img = ImageTk.PhotoImage(init_img)
+		else:
+			self.img = ImageTk.PhotoImage(init_img.resize((int(1280*self.scaling_ratio), int(780*self.scaling_ratio))))
 
 		self.label = tkinter.Label(self.win, image=self.img)
 		self.label.grid(row=0, column=0, columnspan=4, sticky=tkinter.NSEW)
 		self.button_1 = \
-			tkinter.Button(self.win, text='use file', command=lambda: thread_func(self.use_file), font=('Consolas', 20, 'bold'), width=30, height=3, bd=5)
+			tkinter.Button(self.win, text='use file', command=lambda: thread_func(self.use_file), font=('Consolas', size, 'bold'), width=30, height=3, bd=5)
 		self.button_2 = \
-			tkinter.Button(self.win, text='use dir ', command=lambda: thread_func(self.use_dir), font=('Consolas', 20, 'bold'), width=30, bd=5)
+			tkinter.Button(self.win, text='use dir ', command=lambda: thread_func(self.use_dir), font=('Consolas', size, 'bold'), width=30, bd=5)
 		self.button_1.grid(row=1, column=0, rowspan=2, sticky=tkinter.NSEW)
 		self.button_2.grid(row=1, column=1, rowspan=2, sticky=tkinter.NSEW)
 
 		self.button_3 = \
-			tkinter.Button(self.win, image=self.pixelVirtual, command=self.change_img_1, height=480, width=400, bd=1)
+			tkinter.Button(self.win, image=self.pixelVirtual, command=self.change_img_1, height=480*self.scaling_ratio, width=400*self.scaling_ratio, bd=1)
 		self.button_4 = \
-			tkinter.Button(self.win, image=self.pixelVirtual, command=self.change_img_2, height=480, width=400, bd=1)
+			tkinter.Button(self.win, image=self.pixelVirtual, command=self.change_img_2, height=480*self.scaling_ratio, width=400*self.scaling_ratio, bd=1)
 		self.button_5 = \
-			tkinter.Button(self.win, image=self.pixelVirtual, command=self.change_img_3, height=480, width=400, bd=1)
+			tkinter.Button(self.win, image=self.pixelVirtual, command=self.change_img_3, height=480*self.scaling_ratio, width=400*self.scaling_ratio, bd=1)
 
 		self.status = tkinter.IntVar()
 		self.text = tkinter.StringVar()
-		self.text_label = tkinter.Label(self.win, textvariable=self.text, font=('Consolas', 20, 'bold'), width=35, height=3)
+		self.text_label = tkinter.Label(self.win, textvariable=self.text, font=('Consolas', size, 'bold'), width=35, height=3)
 		self.radiobutton_1 = \
-			tkinter.Radiobutton(self.win, text='On', variable=self.status, value=1, font=('Consolas', 20, 'bold'), width=5, command=self.change_label)
+			tkinter.Radiobutton(self.win, text='On', variable=self.status, value=1, font=('Consolas', size, 'bold'), width=5, command=self.change_label)
 		self.radiobutton_2 = \
-			tkinter.Radiobutton(self.win, text='Off', variable=self.status, value=0, font=('Consolas', 20, 'bold'), command=self.change_label)
+			tkinter.Radiobutton(self.win, text='Off', variable=self.status, value=0, font=('Consolas', size, 'bold'), command=self.change_label)
 
 		Mem = float(psutil.virtual_memory().total)/1024/1024/1024
 		if Mem > 16:
@@ -84,9 +101,24 @@ class Reader:
 			self.radiobutton_1.select()
 			self.text_label.configure(bg='green')
 
-		self.text_label.grid(row=1, rowspan=2, column=2, sticky=tkinter.NSEW)
-		self.radiobutton_1.grid(row=1, column=3, sticky=tkinter.NSEW)
-		self.radiobutton_2.grid(row=2, column=3, sticky=tkinter.NSEW)
+		if self.scaling_ratio <= 0.625:
+			self.radiobutton_1.configure(text='LMM On', font=('Consolas', size, 'bold'))
+			self.button_1.configure(font=('Consolas', size, 'bold'))
+			self.button_2.configure(font=('Consolas', size, 'bold'))
+			self.radiobutton_2.configure(text='LMM Off', font=('Consolas', size, 'bold'))
+			if Mem > 16:
+				self.radiobutton_1.configure(bg='gray')
+				self.radiobutton_2.configure(bg='green')
+			else:
+				self.radiobutton_1.configure(bg='green')
+				self.radiobutton_2.configure(bg='gray')
+			# self.text_label.grid(row=1, rowspan=2, column=2, sticky=tkinter.NSEW)
+			self.radiobutton_1.grid(row=1, column=2, columnspan=2, sticky=tkinter.NSEW)
+			self.radiobutton_2.grid(row=2, column=2, columnspan=2, sticky=tkinter.NSEW)
+		else:
+			self.text_label.grid(row=1, rowspan=2, column=2, sticky=tkinter.NSEW)
+			self.radiobutton_1.grid(row=1, column=3, sticky=tkinter.NSEW)
+			self.radiobutton_2.grid(row=2, column=3, sticky=tkinter.NSEW)
 
 		self.win.grid_columnconfigure(0, weight=1)
 		self.win.grid_columnconfigure(1, weight=1)
@@ -111,18 +143,24 @@ class Reader:
 		self.button_3.bind('<MouseWheel>', self.mouse_img)
 		self.button_4.bind('<MouseWheel>', self.mouse_img)
 		self.button_5.bind('<MouseWheel>', self.mouse_img)
-		# print(self.SW)
-		# print(self.SH)
 
 		self.win.mainloop()
 
 	def change_label(self):
 		if self.status.get():
-			self.text.set('Low Memory Mode: On')
-			self.text_label.configure(bg='green')
+			if self.scaling_ratio > 0.625:
+				self.text.set('Low Memory Mode: On')
+				self.text_label.configure(bg='green')
+			else:
+				self.radiobutton_1.configure(bg='green')
+				self.radiobutton_2.configure(bg='gray')
 		else:
-			self.text.set('Low Memory Mode: Off')
-			self.text_label.configure(bg='gray')
+			if self.scaling_ratio > 0.625:
+				self.text.set('Low Memory Mode: Off')
+				self.text_label.configure(bg='gray')
+			else:
+				self.radiobutton_1.configure(bg='gray')
+				self.radiobutton_2.configure(bg='green')
 
 	def change_grid(self):
 		self.button_1.destroy()
@@ -135,10 +173,10 @@ class Reader:
 		self.button_3.grid(row=0, column=0, sticky=tkinter.NSEW)
 		self.button_4.grid(row=1, column=0, sticky=tkinter.NSEW)
 		self.button_5.grid(row=2, column=0, sticky=tkinter.NSEW)
-		self.label.configure(height=9, width=2000)
-		x = self.SW / 2 - 2400 / 2
-		y = self.SH / 2 - 1440 / 2
-		self.win.geometry('%dx%d+%d+%d' % (2400, 1440, x, y))
+		self.label.configure(height=9, width=2000*self.scaling_ratio)
+		x = self.SW / 2 - 2400*self.scaling_ratio / 2
+		y = self.SH / 2 - 1440*self.scaling_ratio / 2
+		self.win.geometry('%dx%d+%d+%d' % (2400*self.scaling_ratio, 1440*self.scaling_ratio, x, y))
 
 	def show_img(self):
 		img_key = self.key_list[self.id_]
@@ -153,7 +191,7 @@ class Reader:
 			self.button_id_2 = button_id_1 + 1
 			self.button_id_3 = button_id_1 + 2
 
-		if self.status.get():
+		if self.status.get() and self.content.split('.')[-1] != 'db':
 			self.show_img_low()
 			return
 
@@ -161,7 +199,7 @@ class Reader:
 			self.button_id_3]
 		self.img = ImageTk.PhotoImage(self.img_dict[img_key][0])
 		self.img_1, self.img_2, self.img_3 = ImageTk.PhotoImage(self.img_dict[img_k_1][1]), ImageTk.PhotoImage(self.img_dict[img_k_2][1]), ImageTk.PhotoImage(self.img_dict[img_k_3][1])
-		title_ = '{name}--{i}/{l}'.format(name=self.key_list[self.id_].split('\\')[-2], i=self.id_, l=self.length)
+		title_ = '{name}--{i}/{l}'.format(name=self.key_list[self.id_].split(path_str)[-2], i=self.id_, l=self.length)
 		self.win.title(title_)
 		self.label.configure(image=self.img)
 		self.button_3.configure(image=self.img_1)
@@ -172,9 +210,9 @@ class Reader:
 		img_key = self.key_list[self.id_]
 		img_k_1, img_k_2, img_k_3 = self.key_list[self.button_id_], self.key_list[self.button_id_2], self.key_list[
 			self.button_id_3]
-		self.img = ImageTk.PhotoImage(get_img(img_key)[0])
-		self.img_1, self.img_2, self.img_3 = ImageTk.PhotoImage(get_img(img_k_1)[1]), ImageTk.PhotoImage(get_img(img_k_2)[1]), ImageTk.PhotoImage(get_img(img_k_3)[1])
-		title_ = '{name}--{i}/{l}'.format(name=self.key_list[self.id_].split('\\')[-2], i=self.id_, l=self.length)
+		self.img = ImageTk.PhotoImage(get_img(img_key, self.scaling_ratio)[0])
+		self.img_1, self.img_2, self.img_3 = ImageTk.PhotoImage(get_img(img_k_1, self.scaling_ratio)[1]), ImageTk.PhotoImage(get_img(img_k_2, self.scaling_ratio)[1]), ImageTk.PhotoImage(get_img(img_k_3, self.scaling_ratio)[1])
+		title_ = '{name}--{i}/{l}'.format(name=self.key_list[self.id_].split(path_str)[-2], i=self.id_, l=self.length)
 		self.win.title(title_)
 		self.label.configure(image=self.img)
 		self.button_3.configure(image=self.img_1)
@@ -186,40 +224,40 @@ class Reader:
 			self.length = len(self.file_list)
 			return
 
-		threads = [threading.Thread(target=lambda q, file_name, i, total: q.put(sub_loader(file_name, i, total)), args=(self.q, self.file_list, i, self.thread_num)) for i in range(self.thread_num + 1)]
+		threads = [threading.Thread(target=lambda q, file_name, i, total, ratio: q.put(sub_loader(file_name, i, total, ratio)), args=(self.q, self.file_list, i, self.thread_num, self.scaling_ratio)) for i in range(self.thread_num + 1)]
 		for thread in threads:
 			thread.start()
 		for thread in threads:
 			thread.join()
 		while not self.q.empty():
 			for item in self.q.get():
-				self.img_dict[item[-1]] = (item[0], item[1])
+				self.img_dict[item[-1]] = [item[0], item[1]]
 		self.length = len(self.img_dict.keys())
 
 	def sort_img(self):
-		level = max([len(x.split('\\')) for x in self.file_list])
+		level = max([len(x.split(path_str)) for x in self.file_list])
 		new_file_list = []
 		for file in self.file_list:
-			file_split = file.split('\\')
+			file_split = file.split(path_str)
 			if len(file_split) == level:
 				new_file_list.append(file)
 			else:
 				ext = ['OutOfRange'] * (level - len(file_split))
-				new_file_list.append('\\'.join(file_split[:-1] + ext + [file_split[-1]]))
+				new_file_list.append(path_str.join(file_split[:-1] + ext + [file_split[-1]]))
 
 		convert = [new_file_list]
 		lvl = 1
 		while lvl < level:
 			sub = []
 			for to_be_sort in convert:
-				to_be_sort.sort(key=lambda x: encode(x.split('\\')[lvl]))
+				to_be_sort.sort(key=lambda x: encode(x.split(path_str)[lvl]))
 				search_length = len(to_be_sort)
 
 				while search_length >= 1:
 					sub_list = []
-					__path = to_be_sort[0].split('\\')[:lvl]
+					__path = to_be_sort[0].split(path_str)[:lvl]
 					for i in range(search_length - 1, -1, -1):
-						if to_be_sort[i].split('\\')[:lvl] == __path:
+						if to_be_sort[i].split(path_str)[:lvl] == __path:
 							sub_list.append(to_be_sort.pop(i))
 					sub.append(sub_list)
 
@@ -228,15 +266,16 @@ class Reader:
 			convert = sub
 			lvl = lvl + 1
 		raw_key_list = flatten(convert)
-		self.key_list = [i.replace('\\OutOfRange', '') for i in raw_key_list]
+		self.key_list = [i.replace(path_str+'OutOfRange', '') for i in raw_key_list]
 		self.key_list.reverse()
 
 	def use_file(self):
 		if not self.flag:
-			if self.status.get():
-				self.content = askopenfilename(filetypes=[('content text', '*.txt')])
-			else:
-				self.content = askopenfilename(filetypes=[('DataBase file', '*.db'), ('content text', '*.txt')])
+			# if self.status.get():
+			# 	self.content = askopenfilename(filetypes=[('content text', '*.txt')])
+			# else:
+			# 	self.content = askopenfilename(filetypes=[('DataBase file', '*.db'), ('content text', '*.txt')])
+			self.content = askopenfilename(filetypes=[('DataBase file', '*.db'), ('content text', '*.txt')])
 			if self.content:
 				self.flag = True
 			else:
@@ -251,11 +290,21 @@ class Reader:
 
 		# for fast load here:
 		if self.content.split('.')[-1] == 'db':
-			x = self.SW / 2 - 600 / 2
-			y = self.SH / 2 - 200 / 2
-			toplevel = toplevel_with_bar(600, 200, x, y, 'Loading...', 'Now loading db file...')
-			with open(self.content, 'rb') as loader:
-				self.key_list, self.img_dict, self.id_ = dill.load(loader)
+			self.dir_path = path_str.join(self.content.split('/')[:-1])
+			x = self.SW / 2 - 600*self.scaling_ratio / 2
+			y = self.SH / 2 - 200*self.scaling_ratio / 2
+			toplevel = toplevel_with_bar(600*self.scaling_ratio, 200*self.scaling_ratio, x, y, 'Loading...', 'Now loading db file...', self.scaling_ratio > 0.625)
+			try:
+				with open(self.content, 'rb') as loader:
+					self.key_list, self.img_dict, self.id_, self.ex_h, self.ex_w = dill.load(loader)
+					reshape = self._reshape_db()
+			except ValueError:
+				self.old_style = True
+				with open(self.content, 'rb') as loader:
+					self.key_list, self.img_dict, self.id_ = dill.load(loader)
+					reshape = self._reshape_db()
+			except MemoryError:
+				raise MemoryError
 			self.button_id_ = self.id_
 			self.length = len(self.key_list)
 			try:
@@ -263,7 +312,7 @@ class Reader:
 			except RuntimeError:
 				exit()
 		else:
-			self.dir_path = '\\'.join(self.content.split('/')[:-1])
+			self.dir_path = path_str.join(self.content.split('/')[:-1])
 			with open(self.content, 'r', encoding='utf-8') as file:
 				while True:
 					this_line = file.readline()
@@ -281,9 +330,9 @@ class Reader:
 			except ValueError:
 				pass
 
-			x = self.SW / 2 - 600 / 2
-			y = self.SH / 2 - 200 / 2
-			toplevel = toplevel_with_bar(600, 200, x, y, 'Loading...', 'Now loading images...')
+			x = self.SW / 2 - 600*self.scaling_ratio / 2
+			y = self.SH / 2 - 200*self.scaling_ratio / 2
+			toplevel = toplevel_with_bar(600*self.scaling_ratio, 200*self.scaling_ratio, x, y, 'Loading...', 'Now loading images...', self.scaling_ratio > 0.625)
 			self.load_img()
 			self.sort_img()
 			try:
@@ -298,6 +347,9 @@ class Reader:
 		except IndexError:
 			self.button_id_ = self.id_ = 0
 			self.show_img()
+
+		if reshape:
+			messagebox.showinfo(title='Warning', message='Resaving the .db file is highly recommended\n since you have changed your screen resolution.')
 		self.finished = True
 
 	def use_dir(self):
@@ -316,19 +368,19 @@ class Reader:
 			pass
 
 		for __dir_path, __dir_name, __file_names in os.walk(self.dir_path):
-			__dir_path = '\\'.join(__dir_path.split('/'))
+			__dir_path = path_str.join(__dir_path.split('/'))
 			for __file_name in __file_names:
-				img_file = '\\'.join([__dir_path, __file_name])
+				img_file = path_str.join([__dir_path, __file_name])
 				extent = __file_name.split('.')[-1].lower()
 				if extent in ['png', 'jpg', 'jpeg'] and os.path.getsize(img_file) > 2e5:
 					self.file_list.append(img_file)
 
 		self.length = len(self.file_list)
-		self.content = '\\'.join([self.dir_path, 'content.txt'])
+		self.content = path_str.join([self.dir_path, 'content.txt'])
 
-		x = self.SW / 2 - 600 / 2
-		y = self.SH / 2 - 200 / 2
-		toplevel = toplevel_with_bar(600, 200, x, y, 'Loading...', 'Now loading images...')
+		x = self.SW / 2 - 600*self.scaling_ratio / 2
+		y = self.SH / 2 - 200*self.scaling_ratio / 2
+		toplevel = toplevel_with_bar(600*self.scaling_ratio, 200*self.scaling_ratio, x, y, 'Loading...', 'Now loading images...', self.scaling_ratio > 0.625)
 		self.load_img()
 		self.sort_img()
 
@@ -391,15 +443,23 @@ class Reader:
 		go_to = askstring(title='pages', prompt='pages')
 
 		if go_to == 'Fast Save':
-			if self.content.split('.')[-1] == 'db' or self.status.get():
-				return
+			if self.content.split('.')[-1] == 'db':
+				re_str = ' at [0-9]{0,5}x[0-9]{0,5}'
+				try:
+					s = re.findall(re_str, self.content.split('/')[-1])[0]
+					fast_save = self.content.split('/')[-1].replace(s, '')
+				except IndexError:
+					fast_save = self.content.split('/')[-1]
+			else:
+				fast_save = 'fastSave'
 
 			self.fastSaving = True
-			save_path = '\\'.join(self.dir_path.split('/') + ['fastSave.db'])
-			x = self.SW / 2 - 800 / 2
-			y = self.SH / 2 - 200 / 2
-			toplevel = toplevel_with_bar(600, 200, x, y, 'Saving...', 'Now saving db file in \n ..\\fastSave.db')
-			__save_data = (self.key_list, self.img_dict, self.id_)
+			resolution = (str(int(3072*self.scaling_ratio)), str(int(1728*self.scaling_ratio)))
+			save_path = path_str.join(self.dir_path.split('/') + [f'{fast_save} at {resolution[0]}x{resolution[1]}.db'])
+			x = self.SW / 2 - 800*self.scaling_ratio / 2
+			y = self.SH / 2 - 200*self.scaling_ratio / 2
+			toplevel = toplevel_with_bar(800*self.scaling_ratio, 200*self.scaling_ratio, x, y, 'Saving...', f'Now saving db file in \n ..{path_str}{fast_save} at {resolution[0]}x{resolution[1]}.db', self.scaling_ratio > 0.625)
+			__save_data = (self.key_list, self.img_dict, self.id_, (int(1440*self.scaling_ratio), int(400*self.scaling_ratio)), (int(1900*self.scaling_ratio), int(480*self.scaling_ratio)))
 
 			def fast_save():
 				with open(save_path, 'wb') as save:
@@ -454,15 +514,18 @@ class Reader:
 	def reload(self, event):
 		if not self.finished:
 			return
-		x = self.SW / 2 - 400 / 2
-		y = self.SH / 2 - 200 / 2
+		x = self.SW / 2 - 400*self.scaling_ratio / 2
+		y = self.SH / 2 - 200*self.scaling_ratio / 2
 		toplevel = tkinter.Toplevel()
 		toplevel.title('Reload')
-		toplevel.geometry('%dx%d+%d+%d' % (400, 200, x, y))
+		toplevel.geometry('%dx%d+%d+%d' % (400*self.scaling_ratio, 200*self.scaling_ratio, x, y))
 
 		def re_f():
 			self.finished = False
 			self.flag = False
+			self.ex_h = (1440, 480)
+			self.ex_w = (1900, 400)
+			self.old_style = False
 			self.file_list = []
 			self.key_list = []
 			self.img_dict = {}
@@ -473,6 +536,9 @@ class Reader:
 		def re_d():
 			self.finished = False
 			self.flag = False
+			self.ex_h = (1440, 480)
+			self.ex_w = (1900, 400)
+			self.old_style = False
 			self.file_list = []
 			self.key_list = []
 			self.img_dict = {}
@@ -480,8 +546,12 @@ class Reader:
 				self.use_dir()
 			toplevel.destroy()
 
-		button_f = tkinter.Button(toplevel, text='Use file', command=lambda: thread_func(re_f), font=('Consolas', 20, 'bold'), height=3)
-		button_d = tkinter.Button(toplevel, text='Use dir ', command=lambda: thread_func(re_d), font=('Consolas', 20, 'bold'), height=3)
+		if self.scaling_ratio > 0.625:
+			button_f = tkinter.Button(toplevel, text='Use file', command=lambda: thread_func(re_f), font=('Consolas', 20, 'bold'), height=3)
+			button_d = tkinter.Button(toplevel, text='Use dir ', command=lambda: thread_func(re_d), font=('Consolas', 20, 'bold'), height=3)
+		else:
+			button_f = tkinter.Button(toplevel, text='Use file', command=lambda: thread_func(re_f), font=('Consolas', 10, 'bold'), height=3)
+			button_d = tkinter.Button(toplevel, text='Use dir ', command=lambda: thread_func(re_d), font=('Consolas', 10, 'bold'), height=3)
 
 		button_f.grid(row=0, column=0)
 		button_d.grid(row=0, column=1)
@@ -489,6 +559,33 @@ class Reader:
 		toplevel.grid_rowconfigure(0, weight=1)
 		toplevel.grid_columnconfigure(0, weight=1)
 		toplevel.grid_columnconfigure(1, weight=1)
+
+	def _reshape_db(self):
+		s_w, b_w = self.ex_w
+		s_h, b_h = self.ex_h
+		ex_ratio = s_w/1900
+
+		if str(self.scaling_ratio)[:4] == str(ex_ratio)[:4]:
+			return False
+
+		ratio = self.scaling_ratio / ex_ratio
+		if not self.old_style:
+			for key, value in self.img_dict.items():
+				img, button = self.img_dict[key]
+				s_w, s_h = img.size
+				b_w, b_h = button.size
+				self.img_dict[key][0] = self.img_dict[key][0].resize((int(s_w * ratio), int(s_h * ratio)))
+				self.img_dict[key][1] = self.img_dict[key][1].resize((int(b_w * ratio), int(b_h * ratio)))
+		else:
+			for key, value in self.img_dict.items():
+				self.img_dict[key] = list(self.img_dict[key])
+				img, button = self.img_dict[key]
+				s_w, s_h = img.size
+				b_w, b_h = button.size
+				self.img_dict[key][0] = self.img_dict[key][0].resize((int(s_w * ratio), int(s_h * ratio)))
+				self.img_dict[key][1] = self.img_dict[key][1].resize((int(b_w * ratio), int(b_h * ratio)))
+
+		return True
 
 	def close_(self):
 		if self.flag and not self.finished:

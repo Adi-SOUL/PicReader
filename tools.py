@@ -5,13 +5,18 @@ import tkinter
 from tkinter import ttk
 
 
-def toplevel_with_bar(w, h, x, y, name, label_):
+def toplevel_with_bar(w, h, x, y, name, label_, large):
 	toplevel = tkinter.Toplevel()
 	toplevel.title(name)
 	toplevel.geometry('%dx%d+%d+%d' % (w, h, x, y))
-	bar = ttk.Progressbar(toplevel, orient='horizontal', length=250, mode='indeterminate')
-	bar.step(25)
-	label = tkinter.Label(toplevel, text=label_, font=('Consolas', 20, 'bold'), width=40, height=1)
+	if large:
+		bar = ttk.Progressbar(toplevel, orient='horizontal', length=250, mode='indeterminate')
+		bar.step(25)
+		label = tkinter.Label(toplevel, text=label_, font=('Consolas', 20, 'bold'), width=40, height=1)
+	else:
+		bar = ttk.Progressbar(toplevel, orient='horizontal', length=100, mode='indeterminate')
+		bar.step(10)
+		label = tkinter.Label(toplevel, text=label_, font=('Consolas', 10, 'bold'), width=40, height=1)
 	label.grid(row=0, column=0, sticky=tkinter.NSEW)
 	bar.grid(row=1, column=0)
 	toplevel.grid_columnconfigure(0, weight=1)
@@ -21,15 +26,15 @@ def toplevel_with_bar(w, h, x, y, name, label_):
 	return toplevel
 
 
-def get_img(img_file):
+def get_img(img_file, ratio):
 	img = Image.open(img_file).convert('RGB')
 	w, h = img.size
 	if h >= w:
-		factor = 1440 / h
-		factor_2 = 480 / h
+		factor = 1440*ratio / h
+		factor_2 = 480*ratio / h
 	else:
-		factor = 1900 / w
-		factor_2 = 400 / w
+		factor = 1900*ratio / w
+		factor_2 = 400*ratio / w
 	new_w, new_h = int(factor * w), int(factor * h)
 	img_resized = img.resize((new_w, new_h))
 	# img_tk = ImageTk.PhotoImage(img_resized)
@@ -44,7 +49,7 @@ def flatten(_list):
 	return sum(([x] if not isinstance(x, list) else flatten(x) for x in _list), [])
 
 
-def sub_loader(file_list, i, total):
+def sub_loader(file_list, i, total, ratio):
 	res = []
 	block = len(file_list) // total
 	if i > total:
@@ -56,7 +61,7 @@ def sub_loader(file_list, i, total):
 	for j in range(len(List)):
 		try:
 			name = List[j]
-			res.append(get_img(name))
+			res.append(get_img(name, ratio))
 		except MemoryError:
 			print('Memory ran out!')
 			break
