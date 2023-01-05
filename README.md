@@ -1,6 +1,6 @@
 # PicReader
 
-![readpic](PicReader/readpic.png)
+![readpic](https://s2.loli.net/2023/01/06/k28jBV4oDxnRY6e.png)
 
 A simple script which can help you read scattered pictures
 
