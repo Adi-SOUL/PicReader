@@ -443,6 +443,8 @@ class Reader:
 		go_to = askstring(title='pages', prompt='pages')
 
 		if go_to == 'Fast Save':
+			if self.status.get():
+				return
 			if self.content.split('.')[-1] == 'db':
 				re_str = ' at [0-9]{0,5}x[0-9]{0,5}'
 				try:
@@ -489,6 +491,8 @@ class Reader:
 			else:
 				self.id_ = int(want)
 		except AttributeError:
+			return
+		except ValueError:
 			return
 
 		try:
