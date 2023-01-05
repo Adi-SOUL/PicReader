@@ -38,7 +38,7 @@ To the next picture;
 
 * *Enter the page number where you want to go, or give the offset.*
 
-        for example, if you were on P20, *+50* will take you to P70 and *-19* will take you to         P1.
+        for example, if you were on P20, *+50* will take you to P70 and *-19* will take you to P1.
 
 * *Fast Save*
   
