@@ -2,28 +2,41 @@
 import os
 import re
 import dill
+import json
 import psutil
 import tkinter
-import threading
 from sys import exit
 from queue import Queue
 from _tkinter import TclError
 from tkinter import messagebox
 from PIL import Image, ImageTk
 from tkinter.simpledialog import askstring
+from concurrent.futures import ProcessPoolExecutor
 from tkinter.filedialog import askdirectory, askopenfilename
-from tools import flatten, sub_loader, encode, thread_func, get_img, toplevel_with_bar
+from tools import flatten, encode, thread_func, get_img, toplevel_with_bar
 
 
 if os.name == 'nt':
 	path_str = '\\'
+	save_id_path = '\\'.join([os.path.expanduser('~'), 'AppData', 'Roaming', 'PicReader'])
 else:
 	path_str = '/'
+	save_id_path = '/'.join([os.path.expanduser('~'), 'Libraries', 'PicReader'])
+if not os.path.exists(save_id_path):
+	os.mkdir(save_id_path)
+json_path = path_str.join([save_id_path, 'readHistory.json'])
+try:
+	with open(json_path, 'r', encoding='utf-8') as json_file:
+		test_open = json.load(json_file)
+except (json.decoder.JSONDecodeError, FileNotFoundError):
+	init_in = {}
+	with open(json_path, 'w', encoding='utf-8') as json_file:
+		json.dump(init_in, json_file)
 
 
 class Reader:
 	def __init__(self):
-		self.thread_num = 5
+		self.NUM = psutil.cpu_count()
 		self.q = Queue()
 		self.flag = False
 		self.content = ''
@@ -44,6 +57,7 @@ class Reader:
 		self.ex_h = (1440, 480)
 		self.ex_w = (1900, 400)
 		self.old_style = False
+		self.history = {}
 
 		self.win = tkinter.Tk()
 		self.win.title('reADpIc')
@@ -112,7 +126,6 @@ class Reader:
 			else:
 				self.radiobutton_1.configure(bg='green')
 				self.radiobutton_2.configure(bg='gray')
-			# self.text_label.grid(row=1, rowspan=2, column=2, sticky=tkinter.NSEW)
 			self.radiobutton_1.grid(row=1, column=2, columnspan=2, sticky=tkinter.NSEW)
 			self.radiobutton_2.grid(row=2, column=2, columnspan=2, sticky=tkinter.NSEW)
 		else:
@@ -219,21 +232,6 @@ class Reader:
 		self.button_4.configure(image=self.img_2)
 		self.button_5.configure(image=self.img_3)
 
-	def load_img(self):
-		if self.status.get():
-			self.length = len(self.file_list)
-			return
-
-		threads = [threading.Thread(target=lambda q, file_name, i, total, ratio: q.put(sub_loader(file_name, i, total, ratio)), args=(self.q, self.file_list, i, self.thread_num, self.scaling_ratio)) for i in range(self.thread_num + 1)]
-		for thread in threads:
-			thread.start()
-		for thread in threads:
-			thread.join()
-		while not self.q.empty():
-			for item in self.q.get():
-				self.img_dict[item[-1]] = [item[0], item[1]]
-		self.length = len(self.img_dict.keys())
-
 	def sort_img(self):
 		level = max([len(x.split(path_str)) for x in self.file_list])
 		new_file_list = []
@@ -269,12 +267,31 @@ class Reader:
 		self.key_list = [i.replace(path_str+'OutOfRange', '') for i in raw_key_list]
 		self.key_list.reverse()
 
+	def load_img(self):
+		if self.status.get():
+			self.length = len(self.file_list)
+			return
+
+		ratio = [self.scaling_ratio]*len(self.file_list)
+		with ProcessPoolExecutor(self.NUM) as executor:
+			res = executor.map(get_img, self.file_list, ratio)
+
+		for item in res:
+			self.img_dict[item[-1]] = [item[0], item[1]]
+		self.length = len(self.img_dict.items())
+
+	def get_read_history(self):
+		with open(json_path, 'r', encoding='utf-8') as json_f:
+			self.history = json.load(json_f)
+		self.id_ = self.history.get(self.content, None)
+		if self.id_ is not None:
+			self.button_id_ = self.id_
+			return True
+		else:
+			return False
+
 	def use_file(self):
 		if not self.flag:
-			# if self.status.get():
-			# 	self.content = askopenfilename(filetypes=[('content text', '*.txt')])
-			# else:
-			# 	self.content = askopenfilename(filetypes=[('DataBase file', '*.db'), ('content text', '*.txt')])
 			self.content = askopenfilename(filetypes=[('DataBase file', '*.db'), ('content text', '*.txt')])
 			if self.content:
 				self.flag = True
@@ -288,6 +305,7 @@ class Reader:
 		except TclError:
 			pass
 
+		reshape = False
 		# for fast load here:
 		if self.content.split('.')[-1] == 'db':
 			self.dir_path = path_str.join(self.content.split('/')[:-1])
@@ -296,16 +314,18 @@ class Reader:
 			toplevel = toplevel_with_bar(600*self.scaling_ratio, 200*self.scaling_ratio, x, y, 'Loading...', 'Now loading db file...', self.scaling_ratio > 0.625)
 			try:
 				with open(self.content, 'rb') as loader:
-					self.key_list, self.img_dict, self.id_, self.ex_h, self.ex_w = dill.load(loader)
-					reshape = self._reshape_db()
+					self.key_list, self.img_dict, temp, self.ex_h, self.ex_w = dill.load(loader)
+				reshape = self._reshape_db()
 			except ValueError:
 				self.old_style = True
 				with open(self.content, 'rb') as loader:
-					self.key_list, self.img_dict, self.id_ = dill.load(loader)
+					self.key_list, self.img_dict, temp = dill.load(loader)
 					reshape = self._reshape_db()
 			except MemoryError:
 				raise MemoryError
-			self.button_id_ = self.id_
+			if not self.get_read_history():
+				self.id_ = temp
+				self.button_id_ = self.id_
 			self.length = len(self.key_list)
 			try:
 				toplevel.destroy()
@@ -325,10 +345,13 @@ class Reader:
 
 					self.file_list.append(this_line)
 			try:
-				self.button_id_ = self.id_ = int(self.file_list[-1])
+				temp = int(self.file_list[-1])
 				self.file_list = self.file_list[:-1]
 			except ValueError:
-				pass
+				temp = 0
+			if not self.get_read_history():
+				self.id_ = temp
+				self.button_id_ = self.id_
 
 			x = self.SW / 2 - 600*self.scaling_ratio / 2
 			y = self.SH / 2 - 200*self.scaling_ratio / 2
@@ -383,16 +406,17 @@ class Reader:
 		toplevel = toplevel_with_bar(600*self.scaling_ratio, 200*self.scaling_ratio, x, y, 'Loading...', 'Now loading images...', self.scaling_ratio > 0.625)
 		self.load_img()
 		self.sort_img()
-
 		with open(self.content, 'w', encoding='utf-8') as file:
 			for i in self.key_list:
 				to_file = i + '\n'
 				file.write(to_file)
-			file.write('0\n')
 		try:
 			toplevel.destroy()
 		except RuntimeError:
 			exit()
+
+		if not self.get_read_history():
+			self.button_id_ = self.id_ = 0
 
 		self.change_grid()
 
@@ -596,17 +620,11 @@ class Reader:
 			return
 		if self.fastSaving:
 			return
-		if self.content.split('.')[-1] == 'db':
-			pass
-		else:
-			try:
-				with open(self.content, 'w+', encoding='utf-8') as file:
-					self.key_list.append(str(self.id_))
-					for i in self.key_list:
-						to_file = i + '\n'
-						file.write(to_file)
-			except FileNotFoundError:
-				pass
+
+		self.history[self.content] = self.id_
+		with open(json_path, 'w', encoding='utf-8') as f:
+			json.dump(self.history, f)
+
 		self.win.destroy()
 		exit()
 
