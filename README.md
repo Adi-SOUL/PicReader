@@ -7,7 +7,7 @@ A simple script which can help you read scattered pictures
 ## How to use
 
 ```shell
-python3 main.py
+python3 Reader_v2.py
 ```
 
 Make sure you have installed all the required libraries, or you can get releases here:[Releases · Adi-SOUL/PicReader · GitHub](https://github.com/Adi-SOUL/PicReader/releases)
