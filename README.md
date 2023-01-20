@@ -45,6 +45,10 @@ To the next picture;
   Save the picture package as a single .db file
   
   **CAUTION: NEVER load files which are from unknown sources sinces we are using dill/pickle module ! ! !**
+  
+* *psd*
+  
+  Convert .psd files into .png files
 
 ### Esc Keys
 
