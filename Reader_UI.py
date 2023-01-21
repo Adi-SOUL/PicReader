@@ -50,6 +50,10 @@ class ReaderUI:
 			self.img = ImageTk.PhotoImage(
 				init_img.resize((int(1280 * self.scaling_ratio), int(780 * self.scaling_ratio))))
 
+		self.toplevel_w = 800 * self.scaling_ratio
+		self.toplevel_h = 200 * self.scaling_ratio
+		self.toplevel_x = self.SW / 2 - self.toplevel_w / 2
+		self.toplevel_y = self.SH / 2 - self.toplevel_h / 2
 		self.label = tkinter.Label(self.win, image=self.img)
 		self.label.grid(row=0, column=0, columnspan=4, sticky=tkinter.NSEW)
 		self.button_1 = \

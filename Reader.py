@@ -223,9 +223,7 @@ class Reader(ReaderUI):
 		except HandleFileError:
 			return
 
-		x = self.SW / 2 - 600 * self.scaling_ratio / 2
-		y = self.SH / 2 - 200 * self.scaling_ratio / 2
-		toplevel = toplevel_with_bar(600 * self.scaling_ratio, 200 * self.scaling_ratio, x, y, 'Loading...', 'Now loading db file...', self.scaling_ratio > 0.625)
+		toplevel = toplevel_with_bar(self.toplevel_w, self.toplevel_h, self.toplevel_x, self.toplevel_y, 'Loading...', 'Now loading db file...', self.scaling_ratio > 0.625)
 		try:
 			with open(self.content, 'rb') as loader:
 				self.file_list, self.img_dict, temp, self.ex_h, self.ex_w = dill.load(loader)
@@ -254,16 +252,14 @@ class Reader(ReaderUI):
 				if extent in ['png', 'jpg', 'jpeg'] and os.path.getsize(img_file) > 2e5:
 					self.file_list.append(img_file)
 
-		x = self.SW / 2 - 600 * self.scaling_ratio / 2
-		y = self.SH / 2 - 200 * self.scaling_ratio / 2
-		toplevel = toplevel_with_bar(600*self.scaling_ratio, 200*self.scaling_ratio, x, y, 'Loading...', 'Now loading images...', self.scaling_ratio > 0.625)
+		toplevel = toplevel_with_bar(self.toplevel_w, self.toplevel_h, self.toplevel_x, self.toplevel_y, 'Loading...', 'Now loading images...', self.scaling_ratio > 0.625)
 
 		self.load_img()
 		self.sort_img()
 
 		self.push_img(toplevel=toplevel)
 
-	def reload(self) -> None:
+	def reload(self, event) -> None:
 		if not self.reader_status.get('FILE_NAME_LOAD'):
 			return
 
@@ -341,9 +337,7 @@ class Reader(ReaderUI):
 			self.reader_status['FAST_SAVE'] = True
 			resolution = (str(int(3072 * self.scaling_ratio)), str(int(1728 * self.scaling_ratio)))
 			save_path = path_str.join(self.dir_path.split('/') + [f'{fast_save} at {resolution[0]}x{resolution[1]}.db'])
-			x = self.SW / 2 - 800 * self.scaling_ratio / 2
-			y = self.SH / 2 - 200 * self.scaling_ratio / 2
-			toplevel = toplevel_with_bar(800 * self.scaling_ratio, 200 * self.scaling_ratio, x, y, 'Saving...',  f'Now saving db file in \n ..{path_str}{fast_save} at {resolution[0]}x{resolution[1]}.db',  self.scaling_ratio > 0.625)
+			toplevel = toplevel_with_bar(self.toplevel_w, self.toplevel_h, self.toplevel_x, self.toplevel_y, 'Saving...',  f'Now saving db file in \n ..{path_str}{fast_save} at {resolution[0]}x{resolution[1]}.db',  self.scaling_ratio > 0.625)
 			__save_data = (self.file_list, self.img_dict, self.img_index, (int(1440 * self.scaling_ratio), int(400 * self.scaling_ratio)), (int(1900 * self.scaling_ratio), int(480 * self.scaling_ratio)))
 
 			def fast_save():
@@ -362,12 +356,29 @@ class Reader(ReaderUI):
 			psd_content = askdirectory()
 			try:
 				psd_helper = psd.PSDHelper(psd_content)
+				psd_toplevel = toplevel_with_bar(self.toplevel_w, self.toplevel_h, self.toplevel_x, self.toplevel_y, 'Converting...', 'Now converting psd-files', self.scaling_ratio > 0.625)
 			except HandleFileError:
 				return
-
+			
 			def psd_run():
 				psd_helper.run()
+				psd_toplevel.destroy()
 			tools.thread_func(psd_run)
+
+		elif __command_str__.lower() == 'withdraw':
+			if not self.reader_status['LOAD_FINISH'] or self.content.split('.')[-1] != 'db':
+				return
+			back_toplevel = toplevel_with_bar(self.toplevel_w, self.toplevel_h, self.toplevel_x, self.toplevel_y, 'Converting...', 'Now converting db-files to pictures', self.scaling_ratio > 0.625)
+
+			def back_run():
+				for filename in self.file_list:
+					try:
+						self.img_dict[filename][0].save(filename)
+					except FileNotFoundError:
+						os.makedirs(path_str.join(filename.split(path_str)[:-1]))
+						self.img_dict[filename][0].save(filename)
+				back_toplevel.destroy()
+			tools.thread_func(back_run)
 		else:  # jump id
 			if not self.reader_status['LOAD_FINISH']:
 				return
