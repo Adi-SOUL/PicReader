@@ -14,7 +14,7 @@ if os.name == 'nt':
 	save_id_path = '\\'.join([os.path.expanduser('~'), 'AppData', 'Roaming', 'PicReader'])
 else:
 	path_str = '/'
-	save_id_path = '/'.join([os.path.expanduser('~'), 'Libraries', 'PicReader'])
+	save_id_path = '/'.join([os.path.expanduser('~'), 'PicReader'])
 if not os.path.exists(save_id_path):
 	os.mkdir(save_id_path)
 json_path = path_str.join([save_id_path, 'readHistory.json'])
