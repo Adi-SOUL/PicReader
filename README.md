@@ -1,4 +1,5 @@
 # PicReader
+This is not for the lastest version
 
 ![readpic](https://s2.loli.net/2023/01/06/k28jBV4oDxnRY6e.png)
 
