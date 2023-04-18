@@ -2,18 +2,21 @@ import json
 import os
 import re
 from concurrent.futures import ProcessPoolExecutor
+from multiprocessing import freeze_support
 from queue import Queue
 from sys import exit
-from ttkbootstrap import Meter
 from tkinter.filedialog import askdirectory, askopenfilename
+from tkinter.messagebox import showerror, askokcancel
 from tkinter.simpledialog import askstring
 
 import dill
-from _tkinter import TclError
-
-from Reader_UI import *
-from tools import json_path, path_str, CPU_NUM, tools, psd, HandleFileError
 import psutil
+from _tkinter import TclError
+from ttkbootstrap import Meter
+
+from GifReader import Reader as GifReader
+from UI.Reader_UI import *
+from tools import json_path, path_str, CPU_NUM, tools, psd, HandleFileError
 
 
 # noinspection PyArgumentList
@@ -49,7 +52,9 @@ class Reader(ReaderUI):
 		self.c_list = []
 		self.ex_h = (1440, 480)
 		self.ex_w = (1900, 400)
-		self.history = {}
+
+		with open(json_path, 'r', encoding='utf-8') as json_f:
+			self.history = json.load(json_f)
 
 		self.reader_status = {
 			'FILE_NAME_LOAD': False,
@@ -58,7 +63,9 @@ class Reader(ReaderUI):
 			'FAST_SAVE': False,
 			'DRAG': False,
 			'SCAL': False,
-			'MEM_M': False
+			'MEM_M': False,
+			'SORTING': False,
+			'FULL_FAST': False
 		}
 
 		self.run()
@@ -66,14 +73,30 @@ class Reader(ReaderUI):
 	def bind_command(self) -> None:
 		self.tool_menu.add_command(label='Jump to', command=self.jump)
 		self.tool_menu.add_command(label='Mem Monitor', command=self.mem)
+		self.tool_menu.add_command(label='GIF Reader', command=self.gif_reader)
+		self.tool_menu.add_command(label='Sorter', command=self.sorter)
+		self.tool_menu.add_command(label='Touch', command=self.for_touch_reader)
 
 		self.file_menu.add_command(label='Fast Save', command=self.main_fast_save)
+		self.file_menu.add_command(label='Fast Save(Full size)', command=self.full_fast_save)
 		self.file_menu.add_command(label='Reload', command=lambda: self.reload(None))
 		self.file_menu.add_command(label='Get Back Pictures', command=self.withdraw)
 		self.file_menu.add_command(label='Exit', command=self._close)
 
-		self.themes_menu.add_command(label='Dark', command=lambda: self.change_theme(theme_name='darkly', size=self.font_size))
-		self.themes_menu.add_command(label='Light', command=lambda: self.change_theme(theme_name='litera', size=self.font_size))
+		self.themes_menu.add_command(
+			label='Dark',
+			command=lambda: self.change_theme(
+				theme_name='darkly',
+				size=self.font_size
+			)
+		)
+		self.themes_menu.add_command(
+			label='Light',
+			command=lambda: self.change_theme(
+				theme_name='litera',
+				size=self.font_size
+			)
+		)
 
 		self.convert_menu.add_command(label='PSD/Dir to PNG', command=self.psd)
 
@@ -105,17 +128,22 @@ class Reader(ReaderUI):
 
 		self.win.mainloop()
 
-	def load_img(self) -> None:
+	def load_img(self, full_size=False) -> None:
 		self.length = len(self.file_list)
 		if self.status.get():
 			return
 
 		ratio = [self.scaling_ratio] * self.length
+		full_size_list = [full_size] * self.length
 		with ProcessPoolExecutor(self.NUM) as executor:
-			load_result = executor.map(tools.get_img, self.file_list, ratio)
+			load_result = executor.map(tools.get_img, self.file_list, ratio, full_size_list)
 
 		for item in load_result:
+			if item[-1] is None:
+				continue
 			self.img_dict[item[-1]] = [item[0], item[1]]
+
+		self.file_list = list(self.img_dict.keys())
 
 	def sort_img(self) -> None:
 		try:
@@ -156,9 +184,40 @@ class Reader(ReaderUI):
 		self.file_list = [i.replace(path_str + 'OutOfRange', '') for i in raw_sorted_list]
 		self.file_list.reverse()
 
+	def sorter(self) -> None:
+		if not self.reader_status['LOAD_FINISH'] \
+				or self.reader_status['FAST_SAVE'] \
+				or self.reader_status['FULL_FAST']:
+			return
+		self.reader_status['SORTING'] = True
+		__command_str__ = askstring(title='Sort', prompt='Keyword')
+		toplevel = toplevel_with_bar(
+			self.toplevel_w,
+			self.toplevel_h,
+			self.toplevel_x,
+			self.toplevel_y,
+			'Loading...',
+			f"Now sorting for {__command_str__}",
+			self.scaling_ratio > 0.625
+		)
+
+		def func():
+			try:
+				self.file_list = tools.clip_sort(files=self.file_list, text=__command_str__)
+				toplevel.destroy()
+			except MemoryError:
+				showerror(title='MemoryError!', message='Can not load CLIP Model.')
+			except RuntimeError:
+				exit()
+
+			self.img_index = 1
+			self.side_img_1_index = 1
+			self.show_img(first=False)
+
+		tools.thread_func(func)
+		self.reader_status['SORTING'] = False
+
 	def get_read_history(self) -> None:
-		with open(json_path, 'r', encoding='utf-8') as json_f:
-			self.history = json.load(json_f)
 		self.img_index = self.history.get(self.content, 0)
 		self.side_img_1_index = self.img_index
 
@@ -195,25 +254,41 @@ class Reader(ReaderUI):
 
 		self.side_img_1, self.side_img_2, self.side_img_3 = \
 			ImageTk.PhotoImage(img_2), ImageTk.PhotoImage(img_3), ImageTk.PhotoImage(img_4)
-		title_ = '{name}--{i}/{l}'.format(name=self.file_list[self.img_index].split(path_str)[-2], i=self.img_index, l=self.length)
+		title_ = '{name}--{i}/{l}'.format(
+			name=self.file_list[self.img_index].split(path_str)[-2],
+			i=self.img_index,
+			l=self.length
+		)
 		self.win.title(title_)
+
+		canvases_t = [
+			(self.side_canvas_1, self.side_img_1),
+			(self.side_canvas_2, self.side_img_2),
+			(self.side_canvas_3, self.side_img_3)
+		]
+		for i in range(min(self.length, 3)):
+			c, img = canvases_t[i]
+			c.itemconfig(self.c_list[i], image=img)
 
 		if refresh_main:
 			self.img = ImageTk.PhotoImage(self.raw_img)
 			self.canvas.itemconfig(self.main_c, image=self.img)
 			self.canvas.config(scrollregion=self.canvas.bbox("all"))
 
-		canvases_t = [(self.side_canvas_1, self.side_img_1), (self.side_canvas_2, self.side_img_2), (self.side_canvas_3, self.side_img_3)]
-		for i in range(min(self.length, 3)):
-			c, img = canvases_t[i]
-			c.itemconfig(self.c_list[i], image=img)
-
 	def get_file_name(self, mode: str) -> None:
 		if self.reader_status.get('FILE_NAME_LOAD'):
 			raise HandleFileError
 
 		if mode == 'file':
-			self.content = askopenfilename(filetypes=[('DataBase file', '*.db'), ('PNG files', '*.png'), ('JPG files', '*.jpg'), ('JPEG files', '*.jpeg')])
+			self.content = askopenfilename(
+				filetypes=[
+					('DataBase file', '*.db'),
+					('DataBase file (in full size)', '*.dbx'),
+					('PNG, JPG, JPEG files', '*.png'),
+					('PNG, JPG, JPEG files', '*.jpg'),
+					('PNG, JPG, JPEG files', '*.jpeg')
+				]
+			)
 			if not self.content:
 				raise HandleFileError
 			self.dir_path = path_str.join(self.content.split('/')[:-1])
@@ -232,7 +307,7 @@ class Reader(ReaderUI):
 		except TclError:
 			pass
 
-	def push_img(self, toplevel: tkinter.Toplevel, reshaped: bool = False) -> None:
+	def push_img(self, toplevel: tkinter.Toplevel) -> None:
 		try:
 			toplevel.destroy()
 		except RuntimeError:
@@ -245,11 +320,30 @@ class Reader(ReaderUI):
 		self.side_canvas_2.delete('all')
 		self.side_canvas_3.delete('all')
 
-		self.main_c = self.canvas.create_image(self.main_canvas_w, self.main_canvas_h, image=self.init_img_tk, anchor="center")
+		self.main_c = self.canvas.create_image(
+			self.main_canvas_w,
+			self.main_canvas_h,
+			image=self.init_img_tk,
+			anchor="center"
+		)
 		self.c_list = [
-			self.side_canvas_1.create_image(self.side_canvas_w, self.side_canvas_h, image=self.init_img_tk, anchor="center"),
-			self.side_canvas_2.create_image(self.side_canvas_w, self.side_canvas_h, image=self.init_img_tk, anchor="center"),
-			self.side_canvas_3.create_image(self.side_canvas_w, self.side_canvas_h, image=self.init_img_tk, anchor="center")
+			self.side_canvas_1.create_image(
+				self.side_canvas_w,
+				self.side_canvas_h,
+				image=self.init_img_tk,
+				anchor="center"
+			),
+			self.side_canvas_2.create_image(
+				self.side_canvas_w,
+				self.side_canvas_h,
+				image=self.init_img_tk,
+				anchor="center"
+			),
+			self.side_canvas_3.create_image(
+				self.side_canvas_w,
+				self.side_canvas_h,
+				image=self.init_img_tk,
+				anchor="center")
 		]
 		if self.length == 2:
 			self.side_canvas_3.delete('all')
@@ -262,24 +356,38 @@ class Reader(ReaderUI):
 
 	def _reshape_db(self) -> bool:
 		s_w, b_w = self.ex_w
-		s_h, b_h = self.ex_h
 		ex_ratio = b_w / 400
 
-		if str(self.scaling_ratio)[:4] == str(ex_ratio)[:4]:
-			return False
-
-		ratio = self.scaling_ratio / ex_ratio
-		if not self.reader_status.get('OLD_STYLE'):
-			for key, value in self.img_dict.items():
-				img, button = self.img_dict[key]
-				b_w, b_h = button.size
-				self.img_dict[key][1] = self.img_dict[key][1].resize((int(b_w * ratio), int(b_h * ratio)))
-		else:
+		if self.reader_status['OLD_STYLE']:
+			if str(self.scaling_ratio)[:2] == str(ex_ratio)[:2]:
+				return False
+			ratio = self.scaling_ratio / ex_ratio
 			for key, value in self.img_dict.items():
 				self.img_dict[key] = list(self.img_dict[key])
 				img, button = self.img_dict[key]
 				b_w, b_h = button.size
+				i_w, i_h = img.size
 				self.img_dict[key][1] = self.img_dict[key][1].resize((int(b_w * ratio), int(b_h * ratio)))
+				self.img_dict[key][0] = self.img_dict[key][0].resize((int(i_w * ratio), int(i_h * ratio)))
+		elif self.content.split(".")[-1] == 'db':
+			if str(self.scaling_ratio)[:2] == str(ex_ratio)[:2]:
+				return False
+			ratio = self.scaling_ratio / ex_ratio
+			for key, value in self.img_dict.items():
+				img, button = self.img_dict[key]
+				b_w, b_h = button.size
+				i_w, i_h = img.size
+				self.img_dict[key][1] = self.img_dict[key][1].resize((int(b_w * ratio), int(b_h * ratio)))
+				self.img_dict[key][0] = self.img_dict[key][0].resize((int(i_w * ratio), int(i_h * ratio)))
+		else:
+			ratio_b = self.scaling_ratio / ex_ratio
+			for key, value in self.img_dict.items():
+				img, button = self.img_dict[key]
+				b_w, b_h = button.size
+				i_w, i_h = img.size
+				ratio = 1440 * self.scaling_ratio / i_h if i_h >= i_w else 1900 * self.scaling_ratio / i_w
+				self.img_dict[key][1] = self.img_dict[key][1].resize((int(b_w * ratio_b), int(b_h * ratio_b)))
+				self.img_dict[key][0] = self.img_dict[key][0].resize((int(i_w * ratio), int(i_h * ratio)))
 
 		return True
 
@@ -288,30 +396,46 @@ class Reader(ReaderUI):
 			self.get_file_name(mode='file')
 		except HandleFileError:
 			return
-		if self.content.split('.')[-1] != 'db':
-			toplevel = toplevel_with_bar(self.toplevel_w, self.toplevel_h, self.toplevel_x, self.toplevel_y, 'Loading...', f"Now loading {self.content.split('.')[-1]} file...", self.scaling_ratio > 0.625)
+		if self.content.split('.')[-1] not in ['db', 'dbx']:
+			toplevel = toplevel_with_bar(
+				self.toplevel_w,
+				self.toplevel_h,
+				self.toplevel_x,
+				self.toplevel_y,
+				'Loading...',
+				f"Now loading {self.content.split('.')[-1]} file...",
+				self.scaling_ratio > 0.625
+			)
 			self.file_list = [self.content]
 			self.load_img()
 			self.push_img(toplevel=toplevel)
 
 			return
-		toplevel = toplevel_with_bar(self.toplevel_w, self.toplevel_h, self.toplevel_x, self.toplevel_y, 'Loading...', 'Now loading db file...', self.scaling_ratio > 0.625)
+		toplevel = toplevel_with_bar(
+			self.toplevel_w,
+			self.toplevel_h,
+			self.toplevel_x,
+			self.toplevel_y,
+			'Loading...',
+			f'Now loading {self.content.split(".")[-1]} file...',
+			self.scaling_ratio > 0.625
+		)
 		try:
 			with open(self.content, 'rb') as loader:
 				self.file_list, self.img_dict, temp, self.ex_h, self.ex_w = dill.load(loader)
-			reshape = self._reshape_db()
+			self._reshape_db()
 		except ValueError:
 			self.reader_status['OLD_STYLE'] = True
 			with open(self.content, 'rb') as loader:
 				self.file_list, self.img_dict, temp = dill.load(loader)
-				reshape = self._reshape_db()
+				self._reshape_db()
 		except MemoryError:
 			self.reload(None)
 			return
 
 		self.length = len(self.file_list)
 
-		self.push_img(toplevel=toplevel, reshaped=reshape)
+		self.push_img(toplevel=toplevel)
 
 	def use_dir(self) -> None:
 		try:
@@ -327,7 +451,15 @@ class Reader(ReaderUI):
 				if extent in ['png', 'jpg', 'jpeg'] and os.path.getsize(img_file) > 2e5:
 					self.file_list.append(img_file)
 
-		toplevel = toplevel_with_bar(self.toplevel_w, self.toplevel_h, self.toplevel_x, self.toplevel_y, 'Loading...', 'Now loading images...', self.scaling_ratio > 0.625)
+		toplevel = toplevel_with_bar(
+			self.toplevel_w,
+			self.toplevel_h,
+			self.toplevel_x,
+			self.toplevel_y,
+			'Loading...',
+			'Now loading images...',
+			self.scaling_ratio > 0.625
+		)
 
 		self.load_img()
 		self.sort_img()
@@ -337,10 +469,11 @@ class Reader(ReaderUI):
 	def reload(self, event) -> None:
 		if not self.reader_status.get('FILE_NAME_LOAD'):
 			return
+		if self.reader_status['FAST_SAVE'] or self.reader_status['FULL_FAST']:
+			return
 
 		def sub_reload_func(mode: str, _toplevel: tkinter.Toplevel) -> None:
 			self.file_list = []
-			self.key_list = []
 			self.img_dict = {}
 			self.ex_h = (1440, 480)
 			self.ex_w = (1900, 400)
@@ -355,15 +488,24 @@ class Reader(ReaderUI):
 				func()
 			_toplevel.destroy()
 
-		size = int(20 * self.scaling_ratio) if int(20 * self.scaling_ratio) < 20 else 20
 		x = self.SW / 2 - 400 * self.scaling_ratio / 2
 		y = self.SH / 2 - 200 * self.scaling_ratio / 2
 		toplevel = tkinter.Toplevel()
 		toplevel.title('Reload')
 		toplevel.geometry('%dx%d+%d+%d' % (400 * self.scaling_ratio, 200 * self.scaling_ratio, x, y))
 
-		button_f = ttk.Button(toplevel, text='With File', command=lambda: tools.thread_func(sub_reload_func, {'mode': 'file', '_toplevel': toplevel}), bootstyle=('success', 'outline'))
-		button_d = ttk.Button(toplevel, text='With Dir ', command=lambda: tools.thread_func(sub_reload_func, {'mode': 'dir', '_toplevel': toplevel}), bootstyle=('success', 'outline'))
+		button_f = ttk.Button(
+			toplevel,
+			text='With File',
+			command=lambda: tools.thread_func(sub_reload_func, {'mode': 'file', '_toplevel': toplevel}),
+			bootstyle=('success', 'outline')
+		)
+		button_d = ttk.Button(
+			toplevel,
+			text='With Dir ',
+			command=lambda: tools.thread_func(sub_reload_func, {'mode': 'dir', '_toplevel': toplevel}),
+			bootstyle=('success', 'outline')
+		)
 
 		button_f.grid(row=0, column=0)
 		button_d.grid(row=0, column=1)
@@ -374,14 +516,14 @@ class Reader(ReaderUI):
 		toplevel.resizable(False, False)
 
 	def img_by_mouse(self, event) -> None:
-		if not self.reader_status['LOAD_FINISH'] or self.length <= 3:
+		if not self.reader_status['LOAD_FINISH'] or self.length <= 3 or self.reader_status['FULL_FAST']:
 			return
 		self.side_img_1_index = self.side_img_1_index - 1 if event.delta > 0 else self.side_img_1_index + 1
 
 		self.show_img()
 
 	def show_next_img(self, event) -> None:
-		if not self.reader_status['LOAD_FINISH']:
+		if not self.reader_status['LOAD_FINISH'] or self.reader_status['FULL_FAST']:
 			return
 		self.img_index += 1
 		if self.length > 3:
@@ -389,7 +531,7 @@ class Reader(ReaderUI):
 		self.show_img()
 
 	def show_last_img(self, event) -> None:
-		if not self.reader_status['LOAD_FINISH']:
+		if not self.reader_status['LOAD_FINISH'] or self.reader_status['FULL_FAST']:
 			return
 		self.img_index -= 1
 		if self.length > 3:
@@ -399,6 +541,9 @@ class Reader(ReaderUI):
 
 	def main_fast_save(self) -> None:
 		if not self.reader_status['LOAD_FINISH'] or self.status.get():
+			return
+
+		if self.reader_status['FAST_SAVE'] or self.reader_status['FULL_FAST']:
 			return
 
 		if self.content.split('.')[-1] == 'db':
@@ -414,8 +559,22 @@ class Reader(ReaderUI):
 		save_dir = path_str.join(save_dir.split('/'))
 
 		save_path = path_str.join([save_dir, f'{fast_save}.db'])
-		toplevel = toplevel_with_bar(self.toplevel_w, self.toplevel_h, self.toplevel_x, self.toplevel_y, 'Saving...', f'Now saving db file in \n ..{save_path}', self.scaling_ratio > 0.625)
-		__save_data = (self.file_list, self.img_dict, self.img_index, (int(1440 * self.scaling_ratio), int(400 * self.scaling_ratio)), (int(1900 * self.scaling_ratio), int(480 * self.scaling_ratio)))
+		toplevel = toplevel_with_bar(
+			self.toplevel_w,
+			self.toplevel_h,
+			self.toplevel_x,
+			self.toplevel_y,
+			'Saving...',
+			f'Now saving db file in \n ..{save_path}',
+			self.scaling_ratio > 0.625
+		)
+		__save_data = (
+			self.file_list,
+			self.img_dict,
+			self.img_index,
+			(int(1900 * self.scaling_ratio), int(480 * self.scaling_ratio)),
+			(int(1440 * self.scaling_ratio), int(400 * self.scaling_ratio))
+		)
 
 		def fast_save():
 			with open(save_path, 'wb') as save:
@@ -428,6 +587,67 @@ class Reader(ReaderUI):
 
 		tools.thread_func(fast_save)
 		return
+
+	def full_fast_save(self) -> None:
+		if not self.reader_status['LOAD_FINISH'] or self.status.get():
+			return
+		if self.reader_status['FAST_SAVE'] or self.reader_status['FULL_FAST']:
+			return
+
+		if self.content.split('.')[-1] == 'db':
+			fast_save = '.'.join(self.content.split(path_str)[-1].split('.')[:-1])
+		elif self.content.split('.')[-1] == 'dbx':
+			showerror(message='dbx file has been loaded!')
+			self.reader_status['FULL_FAST'] = False
+			return
+		else:
+			fast_save = self.content.split(path_str)[-2]
+
+		message = '''Continuing the operation will block the program until the conversion is complete.You will need to reload the folder when the conversion is complete.sure?'''
+		answer = askokcancel('Warning!', message=message)
+		if not answer:
+			self.reader_status['FULL_FAST'] = False
+			return
+
+		self.reader_status['FULL_FAST'] = True
+		save_dir = askdirectory()
+		if not save_dir:
+			self.reader_status['FULL_FAST'] = False
+			return
+		save_dir = path_str.join(save_dir.split('/'))
+
+		save_path = path_str.join([save_dir, f'{fast_save}.dbx'])
+		toplevel = toplevel_with_bar(
+			self.toplevel_w,
+			self.toplevel_h,
+			self.toplevel_x,
+			self.toplevel_y,
+			'Saving...', f'Now saving dbx file in \n ..{save_path}',
+			self.scaling_ratio > 0.625
+		)
+
+		def fast_save():
+			self.img_dict = {}
+
+			self.load_img(full_size=True)
+			__save_data = (
+				self.file_list,
+				self.img_dict,
+				self.img_index,
+				(int(1900 * self.scaling_ratio), int(480 * self.scaling_ratio)),
+				(int(1440 * self.scaling_ratio), int(400 * self.scaling_ratio))
+			)
+
+			with open(save_path, 'wb') as save:
+				dill.dump(__save_data, save)
+			try:
+				toplevel.destroy()
+				self.reader_status['FULL_FAST'] = False
+				self.reload(None)
+			except RuntimeError:
+				exit()
+
+		tools.thread_func(fast_save)
 
 	def psd(self) -> None:
 
@@ -445,7 +665,15 @@ class Reader(ReaderUI):
 			except HandleFileError:
 				return
 			toplevel.destroy()
-			top = toplevel_with_bar(self.toplevel_w, self.toplevel_h, self.toplevel_x, self.toplevel_y, 'Converting', 'Now converting PSD Files...', self.scaling_ratio > 0.625)
+			top = toplevel_with_bar(
+				self.toplevel_w,
+				self.toplevel_h,
+				self.toplevel_x,
+				self.toplevel_y,
+				'Converting',
+				'Now converting PSD Files...',
+				self.scaling_ratio > 0.625
+			)
 
 			def sub_run():
 				psd_helper.run()
@@ -459,8 +687,15 @@ class Reader(ReaderUI):
 		y = self.SH / 2 - 200 * self.scaling_ratio / 2
 		toplevel.geometry('%dx%d+%d+%d' % (400 * self.scaling_ratio, 200 * self.scaling_ratio, x, y))
 
-		button_f = ttk.Button(toplevel, text='With File', command=lambda: tools.thread_func(sub_load_func, {'mode': 'file'}), bootstyle=('success', 'outline'))
-		button_d = ttk.Button(toplevel, text='With Dir ', command=lambda: tools.thread_func(sub_load_func, {'mode': 'dir'}), bootstyle=('success', 'outline'))
+		button_f = ttk.Button(
+			toplevel,
+			text='With File',
+			command=lambda: tools.thread_func(sub_load_func, {'mode': 'file'}),
+			bootstyle=('success', 'outline'))
+		button_d = ttk.Button(
+			toplevel, text='With Dir ',
+			command=lambda: tools.thread_func(sub_load_func, {'mode': 'dir'}),
+			bootstyle=('success', 'outline'))
 
 		button_f.grid(row=0, column=0)
 		button_d.grid(row=0, column=1)
@@ -479,9 +714,23 @@ class Reader(ReaderUI):
 
 		top = tkinter.Toplevel(self.win)
 		top.title('Memory Monitor')
-		top.geometry('%dx%d+%d+%d' % (self.toplevel_w-400, self.toplevel_h, self.toplevel_x+200, self.toplevel_y))
+		top.geometry('%dx%d+%d+%d' % (
+			self.toplevel_w-400,
+			self.toplevel_h,
+			self.toplevel_x+200,
+			self.toplevel_y))
+
 		top.resizable(False, False)
-		meter = Meter(top, metersize=180, padding=10, metertype='semi', subtext='Memory Usage', interactive=False, textright='%', meterthickness=20)
+		meter = Meter(
+			top,
+			metersize=180,
+			padding=10,
+			metertype='semi',
+			subtext='Memory Usage',
+			interactive=False,
+			textright='%',
+			meterthickness=20
+		)
 
 		def _get_mem(m):
 			while True:
@@ -508,7 +757,8 @@ class Reader(ReaderUI):
 	def jump(self) -> None:
 		if not self.reader_status['LOAD_FINISH']:
 			return
-
+		if self.reader_status['FULL_FAST']:
+			return
 		__command_str__ = askstring(title='Jump to', prompt='Page:')
 
 		try:
@@ -530,7 +780,7 @@ class Reader(ReaderUI):
 			elif '-' in want:
 				self.img_index -= int(want.strip('-'))
 			else:
-				self.img_index = int(want)
+				self.img_index = int(want) - 1
 		except AttributeError:
 			return
 		except ValueError:
@@ -540,7 +790,9 @@ class Reader(ReaderUI):
 		self.show_img()
 
 	def withdraw(self) -> None:
-		if not self.reader_status['LOAD_FINISH'] or self.content.split('.')[-1] != 'db':
+		if not self.reader_status['LOAD_FINISH'] or self.content.split('.')[-1] not in ['db', 'dbx']:
+			return
+		if self.reader_status['FAST_SAVE'] or self.reader_status['FULL_FAST']:
 			return
 
 		save_dir = askdirectory()
@@ -549,7 +801,15 @@ class Reader(ReaderUI):
 			return
 		save_dir = path_str.join(save_dir.split('/'))
 
-		back_toplevel = toplevel_with_bar(self.toplevel_w, self.toplevel_h, self.toplevel_x, self.toplevel_y, 'Converting...', 'Now converting db-files to pictures', self.scaling_ratio > 0.625)
+		back_toplevel = toplevel_with_bar(
+			self.toplevel_w,
+			self.toplevel_h,
+			self.toplevel_x,
+			self.toplevel_y,
+			'Converting...',
+			'Now converting db-files to pictures',
+			self.scaling_ratio > 0.625
+		)
 		path_list = [file_name.split(path_str) for file_name in self.file_list]
 		common_prefix = tools.find_longest_common_prefix(path_list)[:-1]
 		to_replace = path_str.join(common_prefix)
@@ -569,6 +829,9 @@ class Reader(ReaderUI):
 		tools.thread_func(back_run)
 
 	def change_img(self, _id: int, event) -> None:
+		if self.reader_status['FULL_FAST']:
+			return
+
 		if _id == 1:
 			self.img_index = self.side_img_1_index
 		elif _id == 2:
@@ -583,15 +846,17 @@ class Reader(ReaderUI):
 	def drag(self, event) -> None:
 		if not self.reader_status['LOAD_FINISH'] or self.reader_status['SCAL']:
 			return
+		if self.reader_status['FULL_FAST']:
+			return
 
 		self.reader_status['DRAG'] = True
 		self.canvas.scan_dragto(event.x, event.y, gain=1)
-		x, y = self.canvas.canvasx(event.x), self.canvas.canvasy(event.y)
-		bbox = self.canvas.bbox("all")
 		self.reader_status['DRAG'] = False
 
 	def scaling(self, event) -> None:
 		if not self.reader_status['LOAD_FINISH'] or self.reader_status['DRAG']:
+			return
+		if self.reader_status['FULL_FAST']:
 			return
 
 		self.reader_status['SCAL'] = True
@@ -615,8 +880,57 @@ class Reader(ReaderUI):
 
 		self.reader_status['SCAL'] = False
 
+	def gif_reader(self) -> None:
+		directory = askdirectory()
+		if not directory:
+			return
+		directory = path_str.join(directory.split('/'))
+		sub_reader = GifReader(
+			self.win,
+			self.SW,
+			self.SH,
+			self.side_color,
+			self.init_img_tk,
+			directory,
+			self.history)
+		sub_reader.run()
+
+	def for_touch_reader(self) -> None:
+		toplevel = tkinter.Toplevel()
+		x = self.SW / 2 + 2400 * self.scaling_ratio / 2 - 400
+		y = self.SH / 2 + 1440 * self.scaling_ratio / 2 - 200
+		toplevel.geometry('%dx%d+%d+%d' % (400, 250, x, y))
+		toplevel.resizable(False, False)
+		frame = ttk.Frame(toplevel)
+		frame.pack(fill='y')
+		label__ = ttk.Label(frame)
+		button_up = ttk.Button(
+			frame,
+			text='UP',
+			width=20,
+			bootstyle=('success', 'outline'),
+			command=lambda: self.show_last_img(None)
+		)
+		label_ = ttk.Label(frame)
+		button_down = ttk.Button(
+			frame,
+			text='DOWN',
+			bootstyle=('success', 'outline'),
+			command=lambda: self.show_next_img(None)
+		)
+		label__.grid(row=0)
+		button_up.grid(row=1, sticky=tkinter.NSEW)
+		label_.grid(row=2)
+		button_down.grid(row=3, sticky=tkinter.NSEW)
+
+		frame.grid_rowconfigure(1, minsize=90, weight=1)
+		frame.grid_rowconfigure(3, minsize=90, weight=1)
+
 	def _close(self) -> None:
-		if (self.reader_status['FILE_NAME_LOAD'] and not self.reader_status['LOAD_FINISH']) or self.reader_status['FAST_SAVE']:
+		if (self.reader_status['FILE_NAME_LOAD'] and not self.reader_status['LOAD_FINISH'])\
+				or self.reader_status['FAST_SAVE']:
+			return
+		if self.reader_status['FULL_FAST']:
 			return
 
 		if not self.stop_inf:
@@ -633,4 +947,5 @@ class Reader(ReaderUI):
 
 
 if __name__ == '__main__':
+	freeze_support()
 	reader = Reader()
