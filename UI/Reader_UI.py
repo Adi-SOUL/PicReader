@@ -63,7 +63,7 @@ class CollapsingFrame(ttk.Frame):
 		self.child = None
 		self.main = None
 		self.side = None
-		self.images = [ttk.PhotoImage(file=r'D:\Documents\PythonProjects\Reader-CLIP\Pics\up.png'), ttk.PhotoImage(file=r'D:\Documents\PythonProjects\Reader-CLIP\Pics\right.png')]
+		self.images = [ttk.PhotoImage(file=r'..\Pics\up.png'), ttk.PhotoImage(file=r'..\Pics\right.png')]
 
 	def add_main(self, main):
 		if main.winfo_class() != 'TFrame':
@@ -146,8 +146,8 @@ class ReaderUI:
 		x = self.SW / 2 - 1280 * self.scaling_ratio / 2
 		y = self.SH / 2 - 900 * self.scaling_ratio / 2
 		self.win.geometry('%dx%d+%d+%d' % (1280 * self.scaling_ratio, 900 * self.scaling_ratio, x, y))
-		self.dark_init_img = Image.open(r'D:\Documents\PythonProjects\Reader-CLIP\Pics\Dreadpic.png')
-		self.init_img = Image.open(r'D:\Documents\PythonProjects\Reader-CLIP\Pics\readpic.png')
+		self.dark_init_img = Image.open(r'..\Pics\Dreadpic.png')
+		self.init_img = Image.open(r'..\Pics\readpic.png')
 		if self.theme_name == 'darkly':
 			if self.scaling_ratio == 1.:
 				self.init_img_tk = ImageTk.PhotoImage(self.dark_init_img)
