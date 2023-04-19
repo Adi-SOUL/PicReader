@@ -86,7 +86,7 @@ v1.1版本（以及之后的版本）由于添加了```CLIP```功能，可执行
 
    点击工具栏上的```Files -> Convert Files -> PSD/Dir to PNG```，可以把```.psd```文件（批量）导出为```.png```文件，（虽然挺慢的）。不需要安装Adobe Photoshop。
    
-   *tools.\_\_init\_\_.mosaic中放入你不想被导出的图层名字（打包前有效）*   
+   *tools.\_\_init\_\_.discarded_layers中放入你不想被导出的图层名字（打包前有效）*   
 
 3. ```.gif```文件支持：
 
