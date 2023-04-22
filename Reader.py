@@ -1,15 +1,15 @@
+import io
 import json
 import os
 import re
+import ttkbootstrap
 from concurrent.futures import ProcessPoolExecutor
 from multiprocessing import freeze_support
-from queue import Queue
 from sys import exit
 from tkinter.filedialog import askdirectory, askopenfilename
-from tkinter.messagebox import showerror, askokcancel
+from tkinter.messagebox import showerror
 from tkinter.simpledialog import askstring
 
-import dill
 import psutil
 from _tkinter import TclError
 from ttkbootstrap import Meter
@@ -18,17 +18,18 @@ from GifReader import Reader as GifReader
 from UI.Reader_UI import *
 from tools import json_path, path_str, CPU_NUM, tools, psd, HandleFileError
 
+from sys import argv
+
 
 # noinspection PyArgumentList
 class Reader(ReaderUI):
-	def __init__(self):
+	def __init__(self, double_click: str | None):
 		super().__init__()
-		self.psd_toplevel = None
+		self.argv_1 = double_click
 		self.record_for_scaling = 1
 		self.NUM = CPU_NUM
 		self.SHUT_DOWN = False
 		self.stop_inf = None
-		self.communication = Queue()
 
 		self.content = ''
 		self.dir_path = ''
@@ -50,8 +51,6 @@ class Reader(ReaderUI):
 		self.side_img_3 = None
 		self.main_c = None
 		self.c_list = []
-		self.ex_h = (1440, 480)
-		self.ex_w = (1900, 400)
 
 		with open(json_path, 'r', encoding='utf-8') as json_f:
 			self.history = json.load(json_f)
@@ -60,7 +59,6 @@ class Reader(ReaderUI):
 			'FILE_NAME_LOAD': False,
 			'LOAD_FINISH': False,
 			'OLD_STYLE': False,
-			'FAST_SAVE': False,
 			'DRAG': False,
 			'SCAL': False,
 			'MEM_M': False,
@@ -77,10 +75,9 @@ class Reader(ReaderUI):
 		self.tool_menu.add_command(label='Sorter', command=self.sorter)
 		self.tool_menu.add_command(label='Touch', command=self.for_touch_reader)
 
-		self.file_menu.add_command(label='Fast Save', command=self.main_fast_save)
-		self.file_menu.add_command(label='Fast Save(Full size)', command=self.full_fast_save)
+		self.file_menu.add_command(label='Pic to DBX', command=self.fast_save)
 		self.file_menu.add_command(label='Reload', command=lambda: self.reload(None))
-		self.file_menu.add_command(label='Get Back Pictures', command=self.withdraw)
+		self.file_menu.add_command(label='DBX to Pic', command=self.withdraw)
 		self.file_menu.add_command(label='Exit', command=self._close)
 
 		self.themes_menu.add_command(
@@ -109,7 +106,6 @@ class Reader(ReaderUI):
 		self.win.bind('<Right>', self.show_next_img)
 		self.win.bind('<Down>', self.show_next_img)
 		self.win.bind('<Left>', self.show_last_img)
-
 		self.win.bind('<Escape>', self.reload)
 		self.win.protocol("WM_DELETE_WINDOW", self._close)
 
@@ -126,7 +122,21 @@ class Reader(ReaderUI):
 		self.canvas.bind('<B1-Motion>', self.drag)
 		self.canvas.bind('<Control-MouseWheel>', self.scaling)
 
+		tools.thread_func(self.check_arg)
 		self.win.mainloop()
+
+	def check_arg(self):
+		if self.argv_1 is None:
+			return
+
+		if os.path.isfile(self.argv_1):
+			extent = self.argv_1.split('.')[-1]
+			if extent.lower() not in ['dbx', 'jpg', 'png', 'jpeg']:
+				exit()
+			else:
+				self.use_file()
+		else:
+			self.use_dir()
 
 	def load_img(self, full_size=False) -> None:
 		self.length = len(self.file_list)
@@ -186,7 +196,6 @@ class Reader(ReaderUI):
 
 	def sorter(self) -> None:
 		if not self.reader_status['LOAD_FINISH'] \
-				or self.reader_status['FAST_SAVE'] \
 				or self.reader_status['FULL_FAST']:
 			return
 		self.reader_status['SORTING'] = True
@@ -280,21 +289,29 @@ class Reader(ReaderUI):
 			raise HandleFileError
 
 		if mode == 'file':
-			self.content = askopenfilename(
-				filetypes=[
-					('DataBase file', '*.db'),
-					('DataBase file (in full size)', '*.dbx'),
-					('PNG, JPG, JPEG files', '*.png'),
-					('PNG, JPG, JPEG files', '*.jpg'),
-					('PNG, JPG, JPEG files', '*.jpeg')
-				]
-			)
-			if not self.content:
-				raise HandleFileError
+			if self.argv_1 is not None:
+				self.content = self.argv_1
+				self.argv_1 = None
+			else:
+				self.content = askopenfilename(
+					filetypes=[
+						('DataBase file (in full size)', '*.dbx'),
+						('PNG, JPG, JPEG files', '*.png'),
+						('PNG, JPG, JPEG files', '*.jpg'),
+						('PNG, JPG, JPEG files', '*.jpeg')
+					]
+				)
+				if not self.content:
+					raise HandleFileError
+
 			self.dir_path = path_str.join(self.content.split('/')[:-1])
 			self.content = path_str.join(self.content.split('/'))
 		else:
-			self.dir_path = askdirectory()
+			if self.argv_1 is not None:
+				self.dir_path = self.argv_1
+				self.argv_1 = None
+			else:
+				self.dir_path = askdirectory()
 			self.dir_path = path_str.join(self.dir_path.split('/'))
 			if not self.dir_path:
 				raise HandleFileError
@@ -354,49 +371,12 @@ class Reader(ReaderUI):
 		self.show_img(first=True)
 		self.reader_status['LOAD_FINISH'] = True
 
-	def _reshape_db(self) -> bool:
-		s_w, b_w = self.ex_w
-		ex_ratio = b_w / 400
-
-		if self.reader_status['OLD_STYLE']:
-			if str(self.scaling_ratio)[:2] == str(ex_ratio)[:2]:
-				return False
-			ratio = self.scaling_ratio / ex_ratio
-			for key, value in self.img_dict.items():
-				self.img_dict[key] = list(self.img_dict[key])
-				img, button = self.img_dict[key]
-				b_w, b_h = button.size
-				i_w, i_h = img.size
-				self.img_dict[key][1] = self.img_dict[key][1].resize((int(b_w * ratio), int(b_h * ratio)))
-				self.img_dict[key][0] = self.img_dict[key][0].resize((int(i_w * ratio), int(i_h * ratio)))
-		elif self.content.split(".")[-1] == 'db':
-			if str(self.scaling_ratio)[:2] == str(ex_ratio)[:2]:
-				return False
-			ratio = self.scaling_ratio / ex_ratio
-			for key, value in self.img_dict.items():
-				img, button = self.img_dict[key]
-				b_w, b_h = button.size
-				i_w, i_h = img.size
-				self.img_dict[key][1] = self.img_dict[key][1].resize((int(b_w * ratio), int(b_h * ratio)))
-				self.img_dict[key][0] = self.img_dict[key][0].resize((int(i_w * ratio), int(i_h * ratio)))
-		else:
-			ratio_b = self.scaling_ratio / ex_ratio
-			for key, value in self.img_dict.items():
-				img, button = self.img_dict[key]
-				b_w, b_h = button.size
-				i_w, i_h = img.size
-				ratio = 1440 * self.scaling_ratio / i_h if i_h >= i_w else 1900 * self.scaling_ratio / i_w
-				self.img_dict[key][1] = self.img_dict[key][1].resize((int(b_w * ratio_b), int(b_h * ratio_b)))
-				self.img_dict[key][0] = self.img_dict[key][0].resize((int(i_w * ratio), int(i_h * ratio)))
-
-		return True
-
 	def use_file(self) -> None:
 		try:
 			self.get_file_name(mode='file')
 		except HandleFileError:
 			return
-		if self.content.split('.')[-1] not in ['db', 'dbx']:
+		if self.content.split('.')[-1] != 'dbx':
 			toplevel = toplevel_with_bar(
 				self.toplevel_w,
 				self.toplevel_h,
@@ -421,19 +401,45 @@ class Reader(ReaderUI):
 			self.scaling_ratio > 0.625
 		)
 		try:
-			with open(self.content, 'rb') as loader:
-				self.file_list, self.img_dict, temp, self.ex_h, self.ex_w = dill.load(loader)
-			self._reshape_db()
-		except ValueError:
-			self.reader_status['OLD_STYLE'] = True
-			with open(self.content, 'rb') as loader:
-				self.file_list, self.img_dict, temp = dill.load(loader)
-				self._reshape_db()
+			temp = []
+			with open(self.content, 'rb') as f:
+				f.seek(0, 0)
+				n = f.read(32)
+				try:
+					self.img_index = int(n.lstrip(b'0').decode('utf-8'))
+				except ValueError:
+					self.img_index = 0
+				total_size = int(f.read(128).lstrip(b'0').decode('utf-8'))
+				self.length = total_size
+				names = []
+				sizes = []
+				for i in range(total_size):
+					file_name = f.read(256).lstrip(b'0').decode('utf-8')
+					size = int(f.read(128).lstrip(b'0').decode('utf-8'))
+					names.append(file_name)
+					sizes.append(size)
+
+				for size in sizes:
+					img_bin = f.read(size)
+					img_b_io = io.BytesIO(img_bin)
+					img = Image.open(img_b_io)
+					temp.append(img)
+
+			self.file_list = names
+			ratio, full_size_list = [self.scaling_ratio] * self.length, [False] * self.length
+			with ProcessPoolExecutor(self.NUM) as executor:
+				load_result = executor.map(tools.get_img, self.file_list, ratio, full_size_list, temp)
+
+			for item in load_result:
+				if item[-1] is None:
+					continue
+				self.img_dict[item[-1]] = [item[0], item[1]]
 		except MemoryError:
 			self.reload(None)
 			return
 
 		self.length = len(self.file_list)
+		self.sort_img()
 
 		self.push_img(toplevel=toplevel)
 
@@ -469,16 +475,13 @@ class Reader(ReaderUI):
 	def reload(self, event) -> None:
 		if not self.reader_status.get('FILE_NAME_LOAD'):
 			return
-		if self.reader_status['FAST_SAVE'] or self.reader_status['FULL_FAST']:
+		if self.reader_status['FULL_FAST']:
 			return
 
 		def sub_reload_func(mode: str, _toplevel: tkinter.Toplevel) -> None:
 			self.file_list = []
 			self.img_dict = {}
-			self.ex_h = (1440, 480)
-			self.ex_w = (1900, 400)
 			self.reader_status['LOAD_FINISH'] = False
-			self.reader_status['OLD_STYLE'] = False
 			self.reader_status['FILE_NAME_LOAD'] = False
 			if mode == 'file':
 				func = self.use_file
@@ -516,14 +519,14 @@ class Reader(ReaderUI):
 		toplevel.resizable(False, False)
 
 	def img_by_mouse(self, event) -> None:
-		if not self.reader_status['LOAD_FINISH'] or self.length <= 3 or self.reader_status['FULL_FAST']:
+		if not self.reader_status['LOAD_FINISH'] or self.length <= 3:
 			return
 		self.side_img_1_index = self.side_img_1_index - 1 if event.delta > 0 else self.side_img_1_index + 1
 
 		self.show_img()
 
 	def show_next_img(self, event) -> None:
-		if not self.reader_status['LOAD_FINISH'] or self.reader_status['FULL_FAST']:
+		if not self.reader_status['LOAD_FINISH']:
 			return
 		self.img_index += 1
 		if self.length > 3:
@@ -531,7 +534,7 @@ class Reader(ReaderUI):
 		self.show_img()
 
 	def show_last_img(self, event) -> None:
-		if not self.reader_status['LOAD_FINISH'] or self.reader_status['FULL_FAST']:
+		if not self.reader_status['LOAD_FINISH']:
 			return
 		self.img_index -= 1
 		if self.length > 3:
@@ -539,59 +542,10 @@ class Reader(ReaderUI):
 		self.side_img_1_index = self.img_index
 		self.show_img()
 
-	def main_fast_save(self) -> None:
+	def fast_save(self) -> None:
 		if not self.reader_status['LOAD_FINISH'] or self.status.get():
 			return
-
-		if self.reader_status['FAST_SAVE'] or self.reader_status['FULL_FAST']:
-			return
-
-		if self.content.split('.')[-1] == 'db':
-			fast_save = '.'.join(self.content.split(path_str)[-1].split('.')[:-1])
-		else:
-			fast_save = self.content.split(path_str)[-2]
-		self.reader_status['FAST_SAVE'] = True
-
-		save_dir = askdirectory()
-		if not save_dir:
-			self.reader_status['FAST_SAVE'] = False
-			return
-		save_dir = path_str.join(save_dir.split('/'))
-
-		save_path = path_str.join([save_dir, f'{fast_save}.db'])
-		toplevel = toplevel_with_bar(
-			self.toplevel_w,
-			self.toplevel_h,
-			self.toplevel_x,
-			self.toplevel_y,
-			'Saving...',
-			f'Now saving db file in \n ..{save_path}',
-			self.scaling_ratio > 0.625
-		)
-		__save_data = (
-			self.file_list,
-			self.img_dict,
-			self.img_index,
-			(int(1900 * self.scaling_ratio), int(480 * self.scaling_ratio)),
-			(int(1440 * self.scaling_ratio), int(400 * self.scaling_ratio))
-		)
-
-		def fast_save():
-			with open(save_path, 'wb') as save:
-				dill.dump(__save_data, save)
-			try:
-				toplevel.destroy()
-				self.reader_status['FAST_SAVE'] = False
-			except RuntimeError:
-				exit()
-
-		tools.thread_func(fast_save)
-		return
-
-	def full_fast_save(self) -> None:
-		if not self.reader_status['LOAD_FINISH'] or self.status.get():
-			return
-		if self.reader_status['FAST_SAVE'] or self.reader_status['FULL_FAST']:
+		if self.reader_status['FULL_FAST']:
 			return
 
 		if self.content.split('.')[-1] == 'db':
@@ -603,12 +557,6 @@ class Reader(ReaderUI):
 		else:
 			fast_save = self.content.split(path_str)[-2]
 
-		message = '''Continuing the operation will block the program until the conversion is complete.You will need to reload the folder when the conversion is complete.sure?'''
-		answer = askokcancel('Warning!', message=message)
-		if not answer:
-			self.reader_status['FULL_FAST'] = False
-			return
-
 		self.reader_status['FULL_FAST'] = True
 		save_dir = askdirectory()
 		if not save_dir:
@@ -617,37 +565,45 @@ class Reader(ReaderUI):
 		save_dir = path_str.join(save_dir.split('/'))
 
 		save_path = path_str.join([save_dir, f'{fast_save}.dbx'])
+		percent = 0
+		temp_v = ttkbootstrap.StringVar()
+		temp_v.set(f'Now saving .dbx file in \n {save_path}\n {percent}%')
 		toplevel = toplevel_with_bar(
 			self.toplevel_w,
 			self.toplevel_h,
 			self.toplevel_x,
 			self.toplevel_y,
-			'Saving...', f'Now saving dbx file in \n ..{save_path}',
+			'Saving...',
+			temp_v,
 			self.scaling_ratio > 0.625
 		)
 
-		def fast_save():
-			self.img_dict = {}
-
-			self.load_img(full_size=True)
-			__save_data = (
-				self.file_list,
-				self.img_dict,
-				self.img_index,
-				(int(1900 * self.scaling_ratio), int(480 * self.scaling_ratio)),
-				(int(1440 * self.scaling_ratio), int(400 * self.scaling_ratio))
-			)
-
+		def _fast_save():
+			i = 0
 			with open(save_path, 'wb') as save:
-				dill.dump(__save_data, save)
+				x = bytearray(str(self.img_index), encoding='utf-8').zfill(32)
+				x += bytearray(str(len(self.file_list)), encoding='utf-8').zfill(128)
+				for file in self.file_list:
+					_percent = i / (2 * len(self.file_list))
+					temp_v.set(f'Now saving .dbx file in \n {save_path}\n {_percent:.2f}%')
+					i += 1
+					x += bytearray(file, encoding='utf-8').zfill(256)
+					x += bytearray(str(os.path.getsize(file)), encoding='utf-8').zfill(128)
+				for file in self.file_list:
+					_percent = i / (2 * len(self.file_list))
+					temp_v.set(f'Now saving .dbx file in \n {save_path}\n {_percent:.2f}%')
+					i += 1
+					with open(file, 'rb') as f1:
+						n = f1.read()
+						x += n
+				save.write(x)
 			try:
 				toplevel.destroy()
 				self.reader_status['FULL_FAST'] = False
-				self.reload(None)
 			except RuntimeError:
 				exit()
 
-		tools.thread_func(fast_save)
+		tools.thread_func(_fast_save)
 
 	def psd(self) -> None:
 
@@ -757,8 +713,7 @@ class Reader(ReaderUI):
 	def jump(self) -> None:
 		if not self.reader_status['LOAD_FINISH']:
 			return
-		if self.reader_status['FULL_FAST']:
-			return
+
 		__command_str__ = askstring(title='Jump to', prompt='Page:')
 
 		try:
@@ -790,9 +745,9 @@ class Reader(ReaderUI):
 		self.show_img()
 
 	def withdraw(self) -> None:
-		if not self.reader_status['LOAD_FINISH'] or self.content.split('.')[-1] not in ['db', 'dbx']:
+		if not self.reader_status['LOAD_FINISH'] or self.content.split('.')[-1] != 'dbx':
 			return
-		if self.reader_status['FAST_SAVE'] or self.reader_status['FULL_FAST']:
+		if self.reader_status['FULL_FAST']:
 			return
 
 		save_dir = askdirectory()
@@ -801,37 +756,58 @@ class Reader(ReaderUI):
 			return
 		save_dir = path_str.join(save_dir.split('/'))
 
+		temp_ = tkinter.StringVar()
+		temp_.set(f'Now converting dbx-files to pictures:\n {0}')
 		back_toplevel = toplevel_with_bar(
 			self.toplevel_w,
 			self.toplevel_h,
 			self.toplevel_x,
 			self.toplevel_y,
 			'Converting...',
-			'Now converting db-files to pictures',
+			temp_,
 			self.scaling_ratio > 0.625
 		)
-		path_list = [file_name.split(path_str) for file_name in self.file_list]
-		common_prefix = tools.find_longest_common_prefix(path_list)[:-1]
-		to_replace = path_str.join(common_prefix)
 
 		def back_run():
-			for filename in self.file_list:
-				save_filename = filename.replace(to_replace, save_dir)
-				try:
-					self.img_dict[filename][0].save(save_filename)
-				except FileNotFoundError:
-					os.makedirs(path_str.join(save_filename.split(path_str)[:-1]))
-					self.img_dict[filename][0].save(save_filename)
-				except FileExistsError:
-					pass
+			i = 0
+			with open(self.content, 'rb') as dbx_file:
+				dbx_file.seek(0, 0)
+				index_bin = dbx_file.read(32)
+				total_size = int(dbx_file.read(128).lstrip(b'0').decode('utf-8'))
+
+				names = []
+				sizes = []
+				for i in range(total_size):
+					file_name = dbx_file.read(256).lstrip(b'0').decode('utf-8')
+					size = int(dbx_file.read(128).lstrip(b'0').decode('utf-8'))
+					names.append(file_name)
+					sizes.append(size)
+
+				path_list = [file_name.split(path_str) for file_name in names]
+				common_prefix = tools.find_longest_common_prefix(path_list)[:-1]
+				to_replace = path_str.join(common_prefix)
+
+				for name, size in zip(names, sizes):
+					_percent = i / total_size
+					temp_.set(f'Now converting dbx-files to pictures:\n {_percent:.2f}%')
+					i += 1
+					save_filename = name.replace(to_replace, save_dir)
+					img_bin = dbx_file.read(size)
+					img_bin_io = io.BytesIO(img_bin)
+					img = Image.open(img_bin_io)
+					try:
+						img.save(save_filename)
+					except FileNotFoundError:
+						os.makedirs(path_str.join(save_filename.split(path_str)[:-1]))
+						img.save(save_filename)
+					except FileExistsError:
+						pass
+
 			back_toplevel.destroy()
 
 		tools.thread_func(back_run)
 
 	def change_img(self, _id: int, event) -> None:
-		if self.reader_status['FULL_FAST']:
-			return
-
 		if _id == 1:
 			self.img_index = self.side_img_1_index
 		elif _id == 2:
@@ -846,8 +822,6 @@ class Reader(ReaderUI):
 	def drag(self, event) -> None:
 		if not self.reader_status['LOAD_FINISH'] or self.reader_status['SCAL']:
 			return
-		if self.reader_status['FULL_FAST']:
-			return
 
 		self.reader_status['DRAG'] = True
 		self.canvas.scan_dragto(event.x, event.y, gain=1)
@@ -855,8 +829,6 @@ class Reader(ReaderUI):
 
 	def scaling(self, event) -> None:
 		if not self.reader_status['LOAD_FINISH'] or self.reader_status['DRAG']:
-			return
-		if self.reader_status['FULL_FAST']:
 			return
 
 		self.reader_status['SCAL'] = True
@@ -928,9 +900,7 @@ class Reader(ReaderUI):
 
 	def _close(self) -> None:
 		if (self.reader_status['FILE_NAME_LOAD'] and not self.reader_status['LOAD_FINISH'])\
-				or self.reader_status['FAST_SAVE']:
-			return
-		if self.reader_status['FULL_FAST']:
+				or self.reader_status['FULL_FAST']:
 			return
 
 		if not self.stop_inf:
@@ -948,4 +918,8 @@ class Reader(ReaderUI):
 
 if __name__ == '__main__':
 	freeze_support()
-	reader = Reader()
+	if len(argv) == 2:
+		_input_ = argv[1]
+	else:
+		_input_ = None
+	reader = Reader(_input_)
