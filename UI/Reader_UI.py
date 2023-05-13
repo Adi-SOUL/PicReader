@@ -1,9 +1,13 @@
+from tools import MEM_STATUS, SCAL_STD, THEME, path_str
+from sys import argv
+root_path = path_str.join(argv[0].split(path_str)[:-1])
+
 import tkinter
+
 import ttkbootstrap as ttk
 from ttkbootstrap import Style, utility
 utility.enable_high_dpi_awareness()
 from PIL import ImageTk, Image
-from tools import MEM_STATUS, SCAL_STD, THEME
 from ttkbootstrap.constants import *
 from ttkbootstrap.style import Bootstyle
 
@@ -15,7 +19,7 @@ def toplevel_with_bar(
 		x: int,
 		y: int,
 		name: str,
-		label_: str,
+		label_: str | tkinter.Variable,
 		large: bool,
 		master=None
 ) -> tkinter.Toplevel:
@@ -29,11 +33,17 @@ def toplevel_with_bar(
 	if large:
 		bar = ttk.Progressbar(toplevel, orient='horizontal', length=250, mode='indeterminate')
 		bar.step(25)
-		label = tkinter.Label(toplevel, text=label_, font=('Consolas', 15, 'bold'), width=40, height=1)
+		if isinstance(label_, str):
+			label = tkinter.Label(toplevel, text=label_, font=('Consolas', 15, 'bold'), width=40, height=1)
+		else:
+			label = tkinter.Label(toplevel, textvariable=label_, font=('Consolas', 15, 'bold'), width=40, height=1)
 	else:
 		bar = ttk.Progressbar(toplevel, orient='horizontal', length=100, mode='indeterminate')
 		bar.step(10)
-		label = tkinter.Label(toplevel, text=label_, font=('Consolas', 10, 'bold'), width=40, height=1)
+		if isinstance(label_, str):
+			label = tkinter.Label(toplevel, text=label_, font=('Consolas', 10, 'bold'), width=40, height=1)
+		else:
+			label = tkinter.Label(toplevel, textvariable=label_, font=('Consolas', 10, 'bold'), width=40, height=1)
 	bar.configure(bootstyle='success')
 	label.grid(row=0, column=0, sticky=tkinter.NSEW)
 	bar.grid(row=1, column=0)
@@ -63,12 +73,14 @@ class CollapsingFrame(ttk.Frame):
 		self.child = None
 		self.main = None
 		self.side = None
-		self.images = [ttk.PhotoImage(file=r'Pics\up.png'), ttk.PhotoImage(file=r'Pics\right.png')]
+		self.minsize = 0
+		self.images = [ttk.PhotoImage(file=path_str.join([root_path, 'Pics', 'up.png'])), ttk.PhotoImage(file=path_str.join([root_path, 'Pics', 'right.png']))]
 
-	def add_main(self, main):
+	def add_main(self, main, minsize):
 		if main.winfo_class() != 'TFrame':
 			return
 		self.main = main
+		self.minsize = minsize
 		self.main_c = self.cumulative_column
 		main.grid(column=self.cumulative_column, row=0, sticky=NSEW)
 		self.cumulative_column += 1
@@ -112,11 +124,70 @@ class CollapsingFrame(ttk.Frame):
 		if child.winfo_viewable():
 			child.grid_remove()
 			self.main.grid(column=1, row=0, sticky=NSEW)
+			self.main.configure(width=self.minsize*2)
 			child.btn.configure(image=self.images[0])
 		else:
 			child.grid()
 			self.main.grid(column=2, row=0, sticky=NSEW)
+			self.main.configure(width=self.minsize)
 			child.btn.configure(image=self.images[1])
+
+
+class CollapsingVFrame(ttk.Frame):
+	def __init__(self, master, **kwargs):
+		super().__init__(master, **kwargs)
+		self.columnconfigure(0, weight=1)
+		self.cumulative_rows = 0
+
+		# widget images
+		self.images = [
+			ttk.PhotoImage(file=path_str.join([root_path, 'Pics', 'down.png'])),
+			ttk.PhotoImage(file=path_str.join([root_path, 'Pics', 'right.png']))
+		]
+
+	def add(self, child, title="", bootstyle=PRIMARY, **kwargs):
+		if child.winfo_class() != 'TFrame':
+			return
+
+		style_color = Bootstyle.ttkstyle_widget_color(bootstyle)
+		frm = ttk.Frame(self, bootstyle=style_color)
+		frm.grid(row=self.cumulative_rows, column=0, sticky=EW)
+
+		# header title
+		header = ttk.Label(
+			master=frm,
+			text=title,
+			bootstyle=(style_color, INVERSE)
+		)
+		if kwargs.get('textvariable'):
+			header.configure(textvariable=kwargs.get('textvariable'))
+		header.pack(side=LEFT, fill=BOTH, padx=10)
+
+		# header toggle button
+		def _func(c=child): return self._toggle_open_close(c)
+		btn = ttk.Button(
+			master=frm,
+			image=self.images[0],
+			bootstyle=style_color,
+			command=_func
+		)
+		btn.pack(side=RIGHT)
+
+		# assign toggle button to child so that it can be toggled
+		child.btn = btn
+		child.grid(row=self.cumulative_rows + 1, column=0, sticky=NSEW)
+		child.grid_remove()
+		child.btn.configure(image=self.images[1])
+		# increment the row assignment
+		self.cumulative_rows += 2
+
+	def _toggle_open_close(self, child):
+		if child.winfo_viewable():
+			child.grid_remove()
+			child.btn.configure(image=self.images[1])
+		else:
+			child.grid()
+			child.btn.configure(image=self.images[0])
 
 
 # noinspection PyArgumentList
@@ -130,7 +201,7 @@ class ReaderUI:
 		self.style = Style()
 		self.win = self.style.master
 		self.win.title('reADpIc')
-		self.win.iconbitmap('PicReader.ico')
+		self.win.iconbitmap(path_str.join([root_path, 'PicReader.ico']))
 		self.pixelVirtual = tkinter.PhotoImage(width=1, height=1)
 		self.main_canvas_h = None
 		self.main_canvas_w = None
@@ -146,8 +217,8 @@ class ReaderUI:
 		x = self.SW / 2 - 1280 * self.scaling_ratio / 2
 		y = self.SH / 2 - 900 * self.scaling_ratio / 2
 		self.win.geometry('%dx%d+%d+%d' % (1280 * self.scaling_ratio, 900 * self.scaling_ratio, x, y))
-		self.dark_init_img = Image.open(r'Pics\Dreadpic.png')
-		self.init_img = Image.open(r'Pics\readpic.png')
+		self.dark_init_img = Image.open(path_str.join([root_path, 'Pics', 'Dreadpic.png']))
+		self.init_img = Image.open(path_str.join([root_path, 'Pics', 'readpic.png']))
 		if self.theme_name == 'darkly':
 			if self.scaling_ratio == 1.:
 				self.init_img_tk = ImageTk.PhotoImage(self.dark_init_img)
@@ -161,7 +232,7 @@ class ReaderUI:
 				self.init_img_tk = ImageTk.PhotoImage(
 					self.init_img.resize((int(1280 * self.scaling_ratio), int(780 * self.scaling_ratio))))
 
-		self.toplevel_w = 800 * self.scaling_ratio
+		self.toplevel_w = 1000 * self.scaling_ratio
 		self.toplevel_h = 200 * self.scaling_ratio
 		self.toplevel_x = self.SW / 2 - self.toplevel_w / 2
 		self.toplevel_y = self.SH / 2 - self.toplevel_h / 2
@@ -203,13 +274,17 @@ class ReaderUI:
 
 		self.file_menu = ttk.Menu(self.menu_bar, font=('Consolas', 12), borderwidth=0)
 		self.tool_menu = ttk.Menu(self.menu_bar, font=('Consolas', 12), borderwidth=0)
+		self.sort_by_time_menu = ttk.Menu(self.tool_menu, font=('Consolas', 12), borderwidth=0)
 		self.convert_menu = ttk.Menu(self.file_menu, font=('Consolas', 12), borderwidth=0)
 		self.themes_menu = ttk.Menu(self.file_menu, font=('Consolas', 12), borderwidth=0)
 
 		self.menu_bar.add_cascade(label='Files', menu=self.file_menu)
 		self.menu_bar.add_cascade(label='Tools', menu=self.tool_menu)
+		self.tool_menu.add_cascade(label='Sort by Time', menu=self.sort_by_time_menu)
 		self.file_menu.add_cascade(label='Themes', menu=self.themes_menu)
 		self.file_menu.add_cascade(label='Convert Files', menu=self.convert_menu)
+
+		self.tree_toplevel = None
 
 		if MEM_STATUS:
 			self.status.set(0)
@@ -295,7 +370,7 @@ class ReaderUI:
 		title = "S\nI\nD\nE\nB\nA\nR"
 		if self.side_c_frame.child is None:
 			self.side_c_frame.add(child=self.side_frame, title=title, size=1440 * self.scaling_ratio)
-			self.side_c_frame.add_main(main=self.main_frame)
+			self.side_c_frame.add_main(main=self.main_frame, minsize=2000 * self.scaling_ratio)
 
 		self.canvas.grid(row=0, column=0, sticky=tkinter.NSEW)
 		self.side_canvas_1.grid(row=0, column=0, sticky=tkinter.NSEW)
@@ -325,5 +400,5 @@ class ReaderUI:
 		self.side_canvas_w = 200 * self.scaling_ratio
 
 		x = self.SW / 2 - 2400 * self.scaling_ratio / 2
-		y = self.SH / 2 - 1440 * self.scaling_ratio / 2
+		y = self.SH / 2 - 1440 * self.scaling_ratio / 2 - 100
 		self.win.geometry('%dx%d+%d+%d' % (2400 * self.scaling_ratio, 1440 * self.scaling_ratio, x, y))
