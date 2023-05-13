@@ -2,6 +2,9 @@ import io
 import json
 import os
 import re
+from hashlib import md5
+from time import strftime, localtime
+
 import ttkbootstrap
 from concurrent.futures import ProcessPoolExecutor
 from multiprocessing import freeze_support
@@ -9,6 +12,7 @@ from sys import exit
 from tkinter.filedialog import askdirectory, askopenfilename
 from tkinter.messagebox import showerror
 from tkinter.simpledialog import askstring
+from ttkbootstrap.scrolled import ScrolledFrame
 
 import psutil
 from _tkinter import TclError
@@ -16,7 +20,7 @@ from ttkbootstrap import Meter
 
 from GifReader import Reader as GifReader
 from UI.Reader_UI import *
-from tools import json_path, path_str, CPU_NUM, tools, psd, HandleFileError
+from tools import json_path, path_str, CPU_NUM, MAGIC_NUM, tools, psd, HandleFileError
 
 from sys import argv
 
@@ -26,6 +30,7 @@ class Reader(ReaderUI):
 	def __init__(self, double_click: str | None):
 		super().__init__()
 		self.argv_1 = double_click
+		self.mode = ''
 		self.record_for_scaling = 1
 		self.NUM = CPU_NUM
 		self.SHUT_DOWN = False
@@ -51,6 +56,8 @@ class Reader(ReaderUI):
 		self.side_img_3 = None
 		self.main_c = None
 		self.c_list = []
+		self.able_to_sort_by_time = True
+		self.time_bytes_dict = {}
 
 		with open(json_path, 'r', encoding='utf-8') as json_f:
 			self.history = json.load(json_f)
@@ -69,10 +76,11 @@ class Reader(ReaderUI):
 		self.run()
 
 	def bind_command(self) -> None:
+		self.tool_menu.add_command(label='Tree', command=self.tree)
 		self.tool_menu.add_command(label='Jump to', command=self.jump)
 		self.tool_menu.add_command(label='Mem Monitor', command=self.mem)
 		self.tool_menu.add_command(label='GIF Reader', command=self.gif_reader)
-		self.tool_menu.add_command(label='Sorter', command=self.sorter)
+		self.tool_menu.add_command(label='Sort by Keywords', command=self.sorter)
 		self.tool_menu.add_command(label='Touch', command=self.for_touch_reader)
 
 		self.file_menu.add_command(label='Pic to DBX', command=self.fast_save)
@@ -96,6 +104,9 @@ class Reader(ReaderUI):
 		)
 
 		self.convert_menu.add_command(label='PSD/Dir to PNG', command=self.psd)
+
+		self.sort_by_time_menu.add_command(label='Ascending', command=lambda: self.sort_by_time(order='ascending'))
+		self.sort_by_time_menu.add_command(label='Descending', command=lambda: self.sort_by_time(order='descending'))
 
 		self.button_1.configure(command=lambda: tools.thread_func(self.use_file))
 		self.button_2.configure(command=lambda: tools.thread_func(self.use_dir))
@@ -194,6 +205,45 @@ class Reader(ReaderUI):
 		self.file_list = [i.replace(path_str + 'OutOfRange', '') for i in raw_sorted_list]
 		self.file_list.reverse()
 
+	def sort_by_time(self, order: str) -> None:
+		if not self.reader_status['LOAD_FINISH'] or self.reader_status['FULL_FAST']:
+			return
+		if order not in ['ascending', 'descending']:
+			return
+		if order == 'descending':
+			reverse = True
+		else:
+			reverse = False
+
+		self.reader_status['SORTING'] = True
+		toplevel = toplevel_with_bar(
+			self.toplevel_w,
+			self.toplevel_h,
+			self.toplevel_x,
+			self.toplevel_y,
+			'Loading...',
+			f"Now sorting by time {order}",
+			self.scaling_ratio > 0.625
+		)
+
+		def func():
+			if self.mode == 'dir':
+				self.file_list.sort(key=lambda x: tools.encode_with_time(x, None), reverse=reverse)
+			elif self.mode == 'file':
+				if self.able_to_sort_by_time:
+					self.file_list.sort(key=lambda x: tools.encode_with_time(x, self.time_bytes_dict), reverse=reverse)
+				else:
+					toplevel.destroy()
+					showerror(title='FileError!', message='Can not get time information from this DBX file.')
+					return
+
+			self.side_img_1_index = self.img_index = 0
+			self.show_img(first=False)
+			toplevel.destroy()
+
+		tools.thread_func(func)
+		self.reader_status['SORTING'] = False
+
 	def sorter(self) -> None:
 		if not self.reader_status['LOAD_FINISH'] \
 				or self.reader_status['FULL_FAST']:
@@ -219,8 +269,8 @@ class Reader(ReaderUI):
 			except RuntimeError:
 				exit()
 
-			self.img_index = 1
-			self.side_img_1_index = 1
+			self.img_index = 0
+			self.side_img_1_index = 0
 			self.show_img(first=False)
 
 		tools.thread_func(func)
@@ -233,6 +283,9 @@ class Reader(ReaderUI):
 	def show_img(self, first=False) -> None:
 		self.img_index = self.img_index % self.length
 		self.record_for_scaling = 1
+
+		if self.length <= 3:
+			self.side_img_1_index = 0
 
 		self.side_img_2_index = self.side_img_1_index + 1
 		self.side_img_3_index = self.side_img_1_index + 2
@@ -284,11 +337,11 @@ class Reader(ReaderUI):
 			self.canvas.itemconfig(self.main_c, image=self.img)
 			self.canvas.config(scrollregion=self.canvas.bbox("all"))
 
-	def get_file_name(self, mode: str) -> None:
+	def get_file_name(self) -> None:
 		if self.reader_status.get('FILE_NAME_LOAD'):
 			raise HandleFileError
 
-		if mode == 'file':
+		if self.mode == 'file':
 			if self.argv_1 is not None:
 				self.content = self.argv_1
 				self.argv_1 = None
@@ -306,7 +359,7 @@ class Reader(ReaderUI):
 
 			self.dir_path = path_str.join(self.content.split('/')[:-1])
 			self.content = path_str.join(self.content.split('/'))
-		else:
+		elif self.mode == 'dir':
 			if self.argv_1 is not None:
 				self.dir_path = self.argv_1
 				self.argv_1 = None
@@ -371,9 +424,15 @@ class Reader(ReaderUI):
 		self.show_img(first=True)
 		self.reader_status['LOAD_FINISH'] = True
 
+		# reload tree view
+		if self.tree_toplevel is not None:
+			self.tree_toplevel.destroy()
+			self.tree()
+
 	def use_file(self) -> None:
 		try:
-			self.get_file_name(mode='file')
+			self.mode = 'file'
+			self.get_file_name()
 		except HandleFileError:
 			return
 		if self.content.split('.')[-1] != 'dbx':
@@ -400,41 +459,78 @@ class Reader(ReaderUI):
 			f'Now loading {self.content.split(".")[-1]} file...',
 			self.scaling_ratio > 0.625
 		)
+
 		try:
 			temp = []
 			with open(self.content, 'rb') as f:
 				f.seek(0, 0)
-				n = f.read(32)
+				file_md5 = md5()
+				b_magic_num, md5_value = next(tools.get_data_and_update_its_md5(file_md5, f, 9))
+				magic_num = b_magic_num.decode('utf-8')
+				if magic_num != MAGIC_NUM:
+					exit()
+
+				test_bytes = f.read(8).lstrip(b'0')
+				f.seek(9, 0)
+				if test_bytes:
+					INDEX_LENGTH = 4
+					TOTAL_SIZE_LENGTH = 4
+					IMG_SIZE_LENGTH = 16
+				else:
+					INDEX_LENGTH = 32
+					TOTAL_SIZE_LENGTH = 128
+					IMG_SIZE_LENGTH = 128
+
+				n, md5_value = next(tools.get_data_and_update_its_md5(file_md5, f, INDEX_LENGTH))
 				try:
 					self.img_index = int(n.lstrip(b'0').decode('utf-8'))
 				except ValueError:
 					self.img_index = 0
-				total_size = int(f.read(128).lstrip(b'0').decode('utf-8'))
+				b_total_size, md5_value = next(tools.get_data_and_update_its_md5(file_md5, f, TOTAL_SIZE_LENGTH))
+				total_size = int(b_total_size.lstrip(b'0').decode('utf-8'))
 				self.length = total_size
 				names = []
 				sizes = []
+				start = INDEX_LENGTH + TOTAL_SIZE_LENGTH + 9
 				for i in range(total_size):
-					file_name = f.read(256).lstrip(b'0').decode('utf-8')
-					size = int(f.read(128).lstrip(b'0').decode('utf-8'))
+					b_file_name, md5_value = next(tools.get_data_and_update_its_md5(file_md5, f, 256))
+					start += 256
+					file_name = b_file_name.lstrip(b'0').decode('utf-8')
+					b_size, md5_value = next(tools.get_data_and_update_its_md5(file_md5, f, IMG_SIZE_LENGTH))
+					start += IMG_SIZE_LENGTH
+					size = int(b_size.lstrip(b'0').decode('utf-8'))
 					names.append(file_name)
 					sizes.append(size)
 
-				for size in sizes:
-					img_bin = f.read(size)
-					img_b_io = io.BytesIO(img_bin)
-					img = Image.open(img_b_io)
-					temp.append(img)
+				for size, name in zip(sizes, names):
+					_, md5_value = next(tools.get_data_and_update_its_md5(file_md5, f, size))
+					end = start + size
+					temp.append([name, self.scaling_ratio, False, self.content, start, end])
+					start += size
+
+				read_md5_value = f.read(32).decode('utf-8')
+				if read_md5_value != md5_value:
+					exit()
+
+				for file in names:
+					time_bytes = f.read(14)
+					if len(time_bytes) != 14:
+						self.able_to_sort_by_time = False
+						self.time_bytes_dict = {}
+						break
+					else:
+						time_int = int(time_bytes.decode('utf-8'))
+						self.time_bytes_dict[file] = time_int
 
 			self.file_list = names
-			ratio, full_size_list = [self.scaling_ratio] * self.length, [False] * self.length
 			with ProcessPoolExecutor(self.NUM) as executor:
-				load_result = executor.map(tools.get_img, self.file_list, ratio, full_size_list, temp)
+				load_result = executor.map(tools.get_img_dbx, temp)
 
 			for item in load_result:
 				if item[-1] is None:
 					continue
 				self.img_dict[item[-1]] = [item[0], item[1]]
-		except MemoryError:
+		except (MemoryError, OSError):
 			self.reload(None)
 			return
 
@@ -445,7 +541,8 @@ class Reader(ReaderUI):
 
 	def use_dir(self) -> None:
 		try:
-			self.get_file_name(mode='dir')
+			self.mode = 'dir'
+			self.get_file_name()
 		except HandleFileError:
 			return
 
@@ -481,8 +578,11 @@ class Reader(ReaderUI):
 		def sub_reload_func(mode: str, _toplevel: tkinter.Toplevel) -> None:
 			self.file_list = []
 			self.img_dict = {}
+			self.able_to_sort_by_time = True
+			self.time_bytes_dict = {}
 			self.reader_status['LOAD_FINISH'] = False
 			self.reader_status['FILE_NAME_LOAD'] = False
+
 			if mode == 'file':
 				func = self.use_file
 			else:
@@ -581,22 +681,39 @@ class Reader(ReaderUI):
 		def _fast_save():
 			i = 0
 			with open(save_path, 'wb') as save:
-				x = bytearray(str(self.img_index), encoding='utf-8').zfill(32)
-				x += bytearray(str(len(self.file_list)), encoding='utf-8').zfill(128)
+				x = bytearray(MAGIC_NUM, encoding='utf-8')
+				x += bytearray(str(self.img_index), encoding='utf-8').zfill(4)
+				x += bytearray(str(len(self.file_list)), encoding='utf-8').zfill(4)
 				for file in self.file_list:
 					_percent = i / (2 * len(self.file_list))
 					temp_v.set(f'Now saving .dbx file in \n {save_path}\n {_percent:.2f}%')
 					i += 1
 					x += bytearray(file, encoding='utf-8').zfill(256)
-					x += bytearray(str(os.path.getsize(file)), encoding='utf-8').zfill(128)
+					x += bytearray(str(os.path.getsize(file)), encoding='utf-8').zfill(16)
+				save_md5 = md5()
+				save_md5.update(x)
+				save.write(x)
+
+				time_array = []
 				for file in self.file_list:
 					_percent = i / (2 * len(self.file_list))
 					temp_v.set(f'Now saving .dbx file in \n {save_path}\n {_percent:.2f}%')
 					i += 1
 					with open(file, 'rb') as f1:
 						n = f1.read()
-						x += n
-				save.write(x)
+						try:
+							time_array.append(strftime('%Y%m%d%H%M%S', localtime(os.stat(file).st_mtime)))
+						except Exception as e:
+							temp_v.set(f'Now saving .dbx file in \n {save_path}\n {_percent:.2f}% \n Catch {e} for {file}')
+							time_array.append(0)
+						save_md5.update(n)
+						save.write(n)
+				md5_value = str(save_md5.hexdigest())
+				save.write(bytearray(md5_value, encoding='utf-8'))
+
+				for time_str in time_array:
+					save.write(bytearray(time_str, encoding='utf-8'))
+
 			try:
 				toplevel.destroy()
 				self.reader_status['FULL_FAST'] = False
@@ -672,7 +789,7 @@ class Reader(ReaderUI):
 		top.title('Memory Monitor')
 		top.geometry('%dx%d+%d+%d' % (
 			self.toplevel_w-400,
-			self.toplevel_h,
+			self.toplevel_h+100,
 			self.toplevel_x+200,
 			self.toplevel_y))
 
@@ -710,36 +827,38 @@ class Reader(ReaderUI):
 		self.stop_inf = _stop_inf
 		top.protocol("WM_DELETE_WINDOW", _stop_inf)
 
-	def jump(self) -> None:
+	def jump(self, to=None) -> None:
 		if not self.reader_status['LOAD_FINISH']:
 			return
+		if to is None:
+			__command_str__ = askstring(title='Jump to', prompt='Page:')
 
-		__command_str__ = askstring(title='Jump to', prompt='Page:')
+			try:
+				__lower_command_str__ = __command_str__.lower()
+			except AttributeError:
+				return
 
-		try:
-			__lower_command_str__ = __command_str__.lower()
-		except AttributeError:
-			return
+			if not self.reader_status['LOAD_FINISH']:
+				return
+			try:
+				ret = re.match('[+-]*[0-9]*', __command_str__)
+			except TypeError:
+				return
 
-		if not self.reader_status['LOAD_FINISH']:
-			return
-		try:
-			ret = re.match('[+-]*[0-9]*', __command_str__)
-		except TypeError:
-			return
-
-		try:
-			want = ret.group()
-			if '+' in want:
-				self.img_index += int(want.strip('+'))
-			elif '-' in want:
-				self.img_index -= int(want.strip('-'))
-			else:
-				self.img_index = int(want) - 1
-		except AttributeError:
-			return
-		except ValueError:
-			return
+			try:
+				want = ret.group()
+				if '+' in want:
+					self.img_index += int(want.strip('+'))
+				elif '-' in want:
+					self.img_index -= int(want.strip('-'))
+				else:
+					self.img_index = int(want) - 1
+			except AttributeError:
+				return
+			except ValueError:
+				return
+		else:
+			self.img_index = to
 
 		self.side_img_1_index = self.img_index
 		self.show_img()
@@ -772,7 +891,8 @@ class Reader(ReaderUI):
 			i = 0
 			with open(self.content, 'rb') as dbx_file:
 				dbx_file.seek(0, 0)
-				index_bin = dbx_file.read(32)
+				_ = dbx_file.read(9)
+				_ = dbx_file.read(32)
 				total_size = int(dbx_file.read(128).lstrip(b'0').decode('utf-8'))
 
 				names = []
@@ -870,9 +990,11 @@ class Reader(ReaderUI):
 	def for_touch_reader(self) -> None:
 		toplevel = tkinter.Toplevel()
 		x = self.SW / 2 + 2400 * self.scaling_ratio / 2 - 400
-		y = self.SH / 2 + 1440 * self.scaling_ratio / 2 - 200
+		y = self.SH / 2 + 1440 * self.scaling_ratio / 2 - 300
 		toplevel.geometry('%dx%d+%d+%d' % (400, 250, x, y))
 		toplevel.resizable(False, False)
+		toplevel.title('触摸按钮')
+		toplevel.attributes('-topmost', 'True')
 		frame = ttk.Frame(toplevel)
 		frame.pack(fill='y')
 		label__ = ttk.Label(frame)
@@ -897,6 +1019,94 @@ class Reader(ReaderUI):
 
 		frame.grid_rowconfigure(1, minsize=90, weight=1)
 		frame.grid_rowconfigure(3, minsize=90, weight=1)
+
+	def tree(self) -> None:
+		if not self.reader_status['LOAD_FINISH']:
+			return
+
+		def get_sub_file(fake_file: str, fake_file_list: list[str]) -> list:
+			result = []
+			for f in fake_file_list:
+				if f.startswith(fake_file) and f != fake_file:
+					temp = f.replace(fake_file, '')
+					if temp.split(path_str)[0] not in result:
+						result.append(temp.split(path_str)[0])
+			return result
+
+		def fake_is_dir(fake_file: str, fake_file_list: list[str]) -> bool:
+			result = []
+			for f in fake_file_list:
+				if f.startswith(fake_file) and f != fake_file:
+					result.append(f)
+			return bool(len(result))
+
+		def has_dir(fake_file: str, fake_file_list: list[str]) -> bool:
+			for item in get_sub_file(fake_file, fake_file_list):
+				if fake_is_dir(''.join([fake_file, item]), fake_file_list):
+					return True
+			return False
+
+		path_list = [__file_name.split(path_str) for __file_name in self.file_list]
+		common_prefix = tools.find_longest_common_prefix(path_list)
+		root = path_str.join(common_prefix)
+
+		self.tree_toplevel = tkinter.Toplevel()
+		x = self.SW / 2 - 2400 * self.scaling_ratio / 2 - 50
+		y = self.SH / 2 - 1440 * self.scaling_ratio / 2 + 150
+		self.tree_toplevel.geometry('%dx%d+%d+%d' % (600, 1000, x, y))
+		self.tree_toplevel.title('TreeView')
+		self.tree_toplevel.grid_columnconfigure(0, minsize=600)
+		# toplevel.resizable(False, False)
+
+		scroll_frame = ScrolledFrame(self.tree_toplevel)
+		root_collapsing_v_frame = CollapsingVFrame(scroll_frame)
+		scroll_frame.pack(fill=BOTH, expand=YES)
+		# scroll_frame.grid_columnconfigure(0, minsize=600)
+		root_collapsing_v_frame.pack(fill=BOTH, expand=YES)
+
+		def _tree(path, frame, depth):
+			name = path.split(path_str)[-2]
+
+			if has_dir(path, self.file_list) or path == root:
+				sub_frame = CollapsingVFrame(frame)
+				temp_text = '|    ' * (depth+1) + f'+----[其他]'
+				# temp_frame = CollapsingVFrame(sub_frame)
+				temp_group = ttk.Frame(sub_frame, padding=(0, 5))
+				flag = False
+
+				for item in get_sub_file(path, self.file_list):
+					if fake_is_dir(''.join([path, item]) + path_str, self.file_list) or path == root:
+						_tree(''.join([path, item]) + path_str, sub_frame, depth=depth+1)
+					else:
+						_to = self.file_list.index(''.join([path, item]))
+						temp_name = ''.join([path, item]).split(path_str)[-1]
+						ttk.Button(temp_group, text=temp_name, command=lambda: self.jump(_to)).pack(fill=X, expand=YES)
+						flag = True
+
+				text = '|    ' * depth + f'+----[{name}]'
+				if flag:
+					# temp_frame.add(child=temp_group, title=temp_text)
+					sub_frame.add(child=temp_group, title=temp_text)
+				frame.add(child=sub_frame, title=text)
+
+			elif fake_is_dir(path, self.file_list):
+				# print(path)
+				group = ttk.Frame(frame, padding=(0, 5))
+				for item in get_sub_file(path, self.file_list):
+					_tree(''.join([path, item]) + path_str, group, depth=depth+1)
+				text = '|    ' * depth + f'+----[{name}]'
+				frame.add(child=group, title=text)
+			else:
+				_to = self.file_list.index(path[:-1])
+				ttk.Button(frame, text=name, command=lambda: self.jump(_to)).pack(fill=X, expand=YES)
+
+		tools.thread_func(_tree, {'path': root, 'frame': root_collapsing_v_frame, 'depth': 0})
+
+		def _close_():
+			self.tree_toplevel.destroy()
+			self.tree_toplevel = None
+
+		self.tree_toplevel.protocol("WM_DELETE_WINDOW", _close_)
 
 	def _close(self) -> None:
 		if (self.reader_status['FILE_NAME_LOAD'] and not self.reader_status['LOAD_FINISH'])\
