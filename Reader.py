@@ -473,8 +473,16 @@ class Reader(ReaderUI):
 				test_bytes = f.read(8).lstrip(b'0')
 				f.seek(9, 0)
 				if test_bytes:
-					INDEX_LENGTH = 4
-					TOTAL_SIZE_LENGTH = 4
+					test_bytes = f.read(16).lstrip(b'0').decode('utf-8')
+					try:
+						_ = int(test_bytes)
+					except ValueError:
+						INDEX_LENGTH = 4
+						TOTAL_SIZE_LENGTH = 4
+					else:
+						INDEX_LENGTH = 8
+						TOTAL_SIZE_LENGTH = 8
+					f.seek(9, 0)
 					IMG_SIZE_LENGTH = 16
 				else:
 					INDEX_LENGTH = 32
@@ -551,7 +559,7 @@ class Reader(ReaderUI):
 			for __file_name in __file_names:
 				img_file = path_str.join([__dir_path, __file_name])
 				extent = __file_name.split('.')[-1].lower()
-				if extent in ['png', 'jpg', 'jpeg'] and os.path.getsize(img_file) > 2e5:
+				if extent in ['png', 'jpg', 'jpeg'] and os.path.getsize(img_file) > 2e4:
 					self.file_list.append(img_file)
 
 		toplevel = toplevel_with_bar(
@@ -682,8 +690,8 @@ class Reader(ReaderUI):
 			i = 0
 			with open(save_path, 'wb') as save:
 				x = bytearray(MAGIC_NUM, encoding='utf-8')
-				x += bytearray(str(self.img_index), encoding='utf-8').zfill(4)
-				x += bytearray(str(len(self.file_list)), encoding='utf-8').zfill(4)
+				x += bytearray(str(self.img_index), encoding='utf-8').zfill(8)
+				x += bytearray(str(len(self.file_list)), encoding='utf-8').zfill(8)
 				for file in self.file_list:
 					_percent = i / (2 * len(self.file_list))
 					temp_v.set(f'Now saving .dbx file in \n {save_path}\n {_percent:.2f}%')
